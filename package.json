@@ -7,17 +7,20 @@
   "exports": {
     ".": "./src/index.ts",
     "./schema/client": "./src/schema/client.ts",
-    "./schema/server": "./src/schema/server.ts"
+    "./schema/server": "./src/schema/server.ts",
+    "./schema/migrations": "./src/schema/migrations.ts"
   },
   "files": [
     "src",
-    "drizzle"
+    "drizzle",
+    "scripts"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:generate": "drizzle-kit generate --config drizzle.client.config.ts && drizzle-kit generate --config drizzle.server.config.ts"
+    "db:generate": "drizzle-kit generate --config drizzle.client.config.ts && drizzle-kit generate --config drizzle.server.config.ts && node scripts/bundle-migrations.mjs",
+    "db:bundle": "node scripts/bundle-migrations.mjs"
   },
   "peerDependencies": {
     "drizzle-orm": ">=0.45.0"
