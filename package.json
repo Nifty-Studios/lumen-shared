@@ -1,0 +1,35 @@
+{
+  "name": "@lumen/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lumen data model, SQLite schema and local-first sync logic shared by desktop, mobile and server.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema/client": "./src/schema/client.ts",
+    "./schema/server": "./src/schema/server.ts"
+  },
+  "files": [
+    "src",
+    "drizzle"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "drizzle-kit generate --config drizzle.client.config.ts && drizzle-kit generate --config drizzle.server.config.ts"
+  },
+  "peerDependencies": {
+    "drizzle-orm": ">=0.45.0"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "drizzle-kit": "^0.31.11",
+    "drizzle-orm": "^0.45.4",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
