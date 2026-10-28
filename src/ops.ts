@@ -96,6 +96,13 @@ export interface FieldChange {
 }
 
 /** Ops for one logical write. All share one hlc, so the write lands atomically. */
+/** A set of field changes to one record, turned into ops by makeOps. */
+export interface RecordWrite {
+  table: TableName;
+  id: string;
+  changes: FieldChange[];
+}
+
 export function makeOps(
   clock: HlcClock,
   table: TableName,

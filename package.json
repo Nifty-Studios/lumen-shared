@@ -9,7 +9,8 @@
     "./schema/client": "./src/schema/client.ts",
     "./schema/server": "./src/schema/server.ts",
     "./schema/migrations": "./src/schema/migrations.ts",
-    "./editor": "./src/editor/index.ts"
+    "./editor": "./src/editor/index.ts",
+    "./client": "./src/client/index.ts"
   },
   "files": [
     "src",

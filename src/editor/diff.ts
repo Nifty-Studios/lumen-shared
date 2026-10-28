@@ -2,15 +2,9 @@
 // Only fields that actually changed produce ops, so small edits make small ops.
 
 import type { Block as EditorBlock } from "@blocknote/core";
-import type { FieldChange, Json, TableName } from "../index";
+import type { FieldChange, Json, RecordWrite, TableName } from "../index";
 import type { Block } from "../schema/client";
 import { fromEditorBlock, isEditorBlock } from "./convert";
-
-export interface RecordWrite {
-  table: TableName;
-  id: string;
-  changes: FieldChange[];
-}
 
 /** Key-order-independent equality for JSON values. */
 export const sameJson = (a: unknown, b: unknown): boolean => stable(a) === stable(b);
