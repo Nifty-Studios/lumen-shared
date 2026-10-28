@@ -8,7 +8,8 @@
     ".": "./src/index.ts",
     "./schema/client": "./src/schema/client.ts",
     "./schema/server": "./src/schema/server.ts",
-    "./schema/migrations": "./src/schema/migrations.ts"
+    "./schema/migrations": "./src/schema/migrations.ts",
+    "./editor": "./src/editor/index.ts"
   },
   "files": [
     "src",
@@ -23,16 +24,23 @@
     "db:bundle": "node scripts/bundle-migrations.mjs"
   },
   "peerDependencies": {
+    "@blocknote/core": ">=0.56.0",
     "drizzle-orm": ">=0.45.0"
   },
   "dependencies": {
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@blocknote/core": "^0.56.0",
     "@types/node": "^26.6.6",
     "drizzle-kit": "^0.31.11",
     "drizzle-orm": "^0.45.4",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
+  },
+  "peerDependenciesMeta": {
+    "@blocknote/core": {
+      "optional": true
+    }
   }
 }
