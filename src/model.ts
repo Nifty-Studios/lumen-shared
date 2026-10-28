@@ -30,12 +30,12 @@ export const BLOCK_TYPES = [
 ] as const;
 export type BlockType = (typeof BLOCK_TYPES)[number];
 
-export type MarkType = "bold" | "italic" | "underline" | "strike" | "code" | "link" | "color";
+export type MarkType = "bold" | "italic" | "underline" | "strike" | "code" | "link" | "color" | "background";
 
 // Type aliases (not interfaces) so they stay assignable to Json.
 export type Mark = {
   type: MarkType;
-  /** href for `link`, color token for `color`. */
+  /** href for `link`, color token for `color` / `background`. */
   value?: string;
 };
 
@@ -65,6 +65,8 @@ export interface BlockFormat {
   icon?: Icon;
   cover?: string;
   color?: string;
+  background?: string;
+  align?: "left" | "center" | "right" | "justify";
   /** callout */
   callout_icon?: Icon;
   page_full_width?: boolean;
