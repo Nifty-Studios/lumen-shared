@@ -1,6 +1,6 @@
 // Workspace queries and edits on top of a LocalStore. Every edit goes through store.write.
 
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { Block as EditorBlock } from "@blocknote/core";
 import { uuidv7 } from "../ids";
 import type { Json } from "../model";
@@ -28,8 +28,9 @@ export interface SearchHit {
 export function createWorkspace(store: LocalStore) {
   const { db, write } = store;
 
+  /** The oldest alive space, so every device settles on the same one if two were created offline. */
   async function getSpace(): Promise<Space | undefined> {
-    const [s] = await db.select().from(space).where(eq(space.alive, true)).limit(1);
+    const [s] = await db.select().from(space).where(eq(space.alive, true)).orderBy(asc(space.created_time), asc(space.id)).limit(1);
     return s;
   }
 
