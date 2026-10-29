@@ -14,7 +14,8 @@ import type { LumenDb } from "./driver";
 
 const OPS_PER_INSERT = 500;
 
-export type ChangeListener =(changed: { table: TableName; id: string }[]) => void;
+/** `remote`: the change came from another device (sync, a restored backup), not this one. */
+export type ChangeListener = (changed: { table: TableName; id: string }[], info: { remote: boolean }) => void;
 
 export class LocalStore {
   private listeners = new Set<ChangeListener>();
@@ -128,6 +129,6 @@ export class LocalStore {
     );
 
     await db.batch(statements as [any, ...any[]]);
-    if (changed.length) for (const listener of this.listeners) listener(changed);
+    if (changed.length) for (const listener of this.listeners) listener(changed, { remote });
   }
 }

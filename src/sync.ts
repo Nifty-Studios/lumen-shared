@@ -1,7 +1,7 @@
 // Wire format between clients and the sync server.
 //   POST /sync/push  PushRequest  -> PushResponse
 //   GET  /sync/pull?since=<cursor>&limit=<n> -> PullResponse
-// The cursor is the server's monotonically increasing op sequence number.
+// The cursor is the server's monotonically increasing op sequence number. Auth: see account.ts.
 
 import { z } from "zod";
 import { TABLES } from "./model";
@@ -28,6 +28,8 @@ export type PushRequest = z.infer<typeof pushRequestSchema>;
 export const pushResponseSchema = z.object({
   /** Ops newly stored (duplicates by id are ignored). */
   accepted: z.number().int().nonnegative(),
+  /** Ops this account isn't allowed to make (e.g. a viewer's edits); never stored or relayed. */
+  rejected: z.array(z.string()).default([]),
 });
 export type PushResponse = z.infer<typeof pushResponseSchema>;
 

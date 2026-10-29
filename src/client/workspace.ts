@@ -1,13 +1,15 @@
 // Workspace queries and edits on top of a LocalStore. Every edit goes through store.write.
 
-import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
-import type { Block as EditorBlock } from "@blocknote/core";
+import { and, asc, eq, gt, inArray, ne, or, sql } from "drizzle-orm";
+import type { Block as EditorBlock, PartialBlock } from "@blocknote/core";
+import { strongerRole, type PageRole, type Role, type SpaceRole } from "../account";
 import { uuidv7 } from "../ids";
-import type { BlockType, Icon, Json } from "../model";
+import type { BlockType, Icon, Json, TableName } from "../model";
 import { setPath, type FieldChange, type RecordWrite } from "../ops";
 import { plainText, richText } from "../text";
-import { block, space, type Block, type Space } from "../schema/client";
+import { block, collection, collection_view, field_clock, meta, ops, space, type Block, type Space } from "../schema/client";
 import { diffPage } from "../editor/diff";
+import { isEditorBlock, toEditorBlock } from "../editor/convert";
 import type { LocalStore } from "./store";
 
 const fields = (values: Record<string, Json>): FieldChange[] =>
@@ -27,6 +29,34 @@ export interface SearchHit {
 
 export type PageSession = Awaited<ReturnType<Workspace["openPage"]>>;
 
+/** What the signed-in account may see. Signed out, everything on the device is the user's own. */
+export interface AccessView {
+  signedIn: boolean;
+  spaces: { id: string; role: SpaceRole }[];
+  pages: { id: string; space_id: string; role: PageRole }[];
+}
+
+/** Another device changed an open page. */
+export interface RemoteUpdate {
+  /** The page's editor blocks as now stored. */
+  doc: PartialBlock[];
+  /** Top-level blocks that changed, appeared or disappeared. */
+  changed: string[];
+  title: string;
+}
+
+const CURRENT_SPACE = "current_space";
+const BOOTSTRAP = "bootstrap";
+const SIGNED_OUT: AccessView = { signedIn: false, spaces: [], pages: [] };
+
+/** The editor's view of a page: its alive, editable top-level blocks. */
+export function editorDoc(page: Block, blocks: Map<string, Block>): PartialBlock[] {
+  return page.content
+    .map((id) => blocks.get(id))
+    .filter((b): b is Block => !!b && b.alive && isEditorBlock(b.type))
+    .map((b) => toEditorBlock(b, blocks));
+}
+
 /** The base after a save: the previous base with the session's own writes applied. */
 function advanceBase(base: Map<string, Block>, pageId: string, writes: RecordWrite[]): Map<string, Block> {
   const next = new Map(base);
@@ -40,13 +70,76 @@ function advanceBase(base: Map<string, Block>, pageId: string, writes: RecordWri
   return next;
 }
 
-export function createWorkspace(store: LocalStore) {
+export function createWorkspace(store: LocalStore, access: () => AccessView = () => SIGNED_OUT) {
   const { db, write } = store;
 
-  /** The oldest alive space, so every device settles on the same one if two were created offline. */
+  const readMeta = async (key: string) => (await db.select().from(meta).where(eq(meta.key, key)))[0]?.value;
+  const writeMeta = (key: string, value: string) =>
+    db.insert(meta).values({ key, value }).onConflictDoUpdate({ target: meta.key, set: { value } });
+
+  /**
+   * Workspaces on this device the user can open, oldest first, with their role. Signed in,
+   * that's what the account can access, plus any created on this device (the server makes
+   * their creator the owner, and access may not have been refreshed since).
+   */
+  async function listSpaces(): Promise<{ space: Space; role: SpaceRole }[]> {
+    const rows = await db.select().from(space).where(eq(space.alive, true)).orderBy(asc(space.created_time), asc(space.id));
+    const a = access();
+    if (!a.signedIn) return rows.map((s) => ({ space: s, role: "owner" as const }));
+    const roles = new Map(a.spaces.map((s) => [s.id, s.role]));
+    const createdHere = new Set(
+      (
+        await db
+          .selectDistinct({ id: ops.record_id })
+          .from(ops)
+          .where(and(eq(ops.table_name, "space"), eq(ops.path, ["created_time"]), eq(ops.device_id, store.deviceId)))
+      ).map((r) => r.id),
+    );
+    return rows.flatMap((s) => {
+      const role = roles.get(s.id) ?? (createdHere.has(s.id) ? "owner" : undefined);
+      return role ? [{ space: s, role }] : [];
+    });
+  }
+
+  /** The workspace in view: the one picked last, else the oldest (so devices agree). */
   async function getSpace(): Promise<Space | undefined> {
-    const [s] = await db.select().from(space).where(eq(space.alive, true)).orderBy(asc(space.created_time), asc(space.id)).limit(1);
-    return s;
+    const spaces = await listSpaces();
+    const picked = await readMeta(CURRENT_SPACE);
+    return (spaces.find((s) => s.space.id === picked) ?? spaces[0])?.space;
+  }
+
+  const setCurrentSpace = (id: string) => writeMeta(CURRENT_SPACE, id);
+
+  /** Pages shared with the user on their own (outside workspaces they're in). */
+  async function sharedPages(): Promise<{ page: Block; role: PageRole }[]> {
+    const a = access();
+    const member = new Set(a.spaces.map((s) => s.id));
+    const shares = a.pages.filter((p) => !member.has(p.space_id));
+    if (!shares.length) return [];
+    const rows = await db.select().from(block).where(and(inArray(block.id, shares.map((p) => p.id)), eq(block.alive, true)));
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    return shares.flatMap((p) => {
+      const page = byId.get(p.id);
+      return page ? [{ page, role: p.role }] : [];
+    });
+  }
+
+  /** The user's role on a block or page: their workspace role, or a share on it or a page above it. */
+  async function roleOf(id: string): Promise<Role | undefined> {
+    const a = access();
+    if (!a.signedIn) return "owner";
+    let cur = await getBlock(id);
+    if (!cur) return undefined;
+    const spaceId = cur.space_id;
+    let role: Role | undefined = (await listSpaces()).find((s) => s.space.id === spaceId)?.role;
+    const shares = new Map(a.pages.map((p) => [p.id, p.role]));
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur.id) && role !== "owner") {
+      seen.add(cur.id);
+      role = strongerRole(role, shares.get(cur.id));
+      cur = cur.parent_table === "block" ? await getBlock(cur.parent_id) : undefined;
+    }
+    return role;
   }
 
   /** First launch: create the workspace and a welcome page. */
@@ -104,7 +197,63 @@ export function createWorkspace(store: LocalStore) {
         changes: fields(record({ type: b.type, properties: { title: richText(b.text) }, format: b.format, parent_id: pageId })),
       })),
     ]);
+    // Remembered so a later sign-in can drop this workspace if it was never used.
+    await writeMeta(BOOTSTRAP, JSON.stringify({ space_id: spaceId, hlc: (await readMeta("last_hlc")) ?? "" }));
     return (await getSpace())!;
+  }
+
+  /** The workspace made at first launch, if nothing in it has changed since. */
+  async function untouchedBootstrap(): Promise<string | undefined> {
+    const raw = await readMeta(BOOTSTRAP);
+    if (!raw) return undefined;
+    const { space_id, hlc } = JSON.parse(raw) as { space_id: string; hlc: string };
+    const inSpace = db.select({ id: block.id }).from(block).where(eq(block.space_id, space_id));
+    const [later] = await db
+      .select({ id: ops.id })
+      .from(ops)
+      .where(and(gt(ops.hlc, hlc), or(eq(ops.record_id, space_id), inArray(ops.record_id, inSpace))))
+      .limit(1);
+    const [alive] = await db.select({ id: space.id }).from(space).where(and(eq(space.id, space_id), eq(space.alive, true)));
+    return alive && !later ? space_id : undefined;
+  }
+
+  /**
+   * Removes records from this device only (no ops): a workspace or shared page the account
+   * lost access to, or an unused first-launch workspace. Their unsent ops go too.
+   */
+  async function forget(scope: { space: string } | { page: string }) {
+    let ids: { table: TableName; id: string }[];
+    if ("space" in scope) {
+      const tables = [
+        ["block", block],
+        ["collection", collection],
+        ["collection_view", collection_view],
+      ] as const;
+      const rows = await Promise.all(
+        tables.map(async ([table, t]) => (await db.select({ id: t.id }).from(t).where(eq(t.space_id, scope.space))).map((r) => ({ table, id: r.id }))),
+      );
+      ids = [{ table: "space" as TableName, id: scope.space }, ...rows.flat()];
+    } else {
+      const rows = (await db.all(sql`
+        WITH RECURSIVE tree(id) AS (SELECT ${scope.page} UNION SELECT block.id FROM block JOIN tree ON block.parent_id = tree.id)
+        SELECT id FROM tree
+      `)) as [string][];
+      ids = rows.map(([id]) => ({ table: "block" as TableName, id }));
+    }
+    const tablesByName = { space, block, collection, collection_view } as const;
+    const statements: any[] = [];
+    for (let i = 0; i < ids.length; i += 400) {
+      const byTable = new Map<TableName, string[]>();
+      for (const { table, id } of ids.slice(i, i + 400)) byTable.set(table, [...(byTable.get(table) ?? []), id]);
+      for (const [table, list] of byTable) {
+        const t = tablesByName[table] as any;
+        statements.push(db.delete(t).where(inArray(t.id, list)));
+        statements.push(db.delete(field_clock).where(and(eq(field_clock.table_name, table), inArray(field_clock.record_id, list))));
+        statements.push(db.delete(ops).where(and(eq(ops.table_name, table), inArray(ops.record_id, list))));
+      }
+    }
+    if (statements.length) await db.batch(statements as [any, ...any[]]);
+    return ids.length;
   }
 
   /** Alive child pages of a page, in order (shown under "Pages inside"). */
@@ -176,21 +325,61 @@ export function createWorkspace(store: LocalStore) {
    */
   async function openPage(pageId: string) {
     let base = await loadPageBlocks(pageId);
+    let page = await getBlock(pageId);
     let queue: Promise<unknown> = Promise.resolve();
+    const enqueue = <T>(task: () => Promise<T>) => {
+      const run = queue.then(task);
+      queue = run.catch(() => {});
+      return run;
+    };
     const saveNow = async (doc: EditorBlock[]) => {
-      const page = await getBlock(pageId);
-      if (!page) return;
-      const writes = diffPage(page, base, doc);
+      const current = await getBlock(pageId);
+      if (!current) return;
+      const writes = diffPage(current, base, doc);
       await write(writes);
       base = advanceBase(base, pageId, writes);
     };
+
+    // Other devices' changes to this page: reload, and tell the editor which top-level blocks moved on.
+    const listeners = new Set<(u: RemoteUpdate) => void>();
+    const offStore = store.onChange((changed, { remote }) => {
+      if (!remote || !listeners.size) return;
+      const ids = new Set(changed.filter((c) => c.table === "block").map((c) => c.id));
+      if (!ids.size) return;
+      void enqueue(async () => {
+        const next = await loadPageBlocks(pageId);
+        const nextPage = await getBlock(pageId);
+        if (!nextPage || !(ids.has(pageId) || [...ids].some((id) => base.has(id) || next.has(id)))) return;
+        const top = (id: string): string | undefined => {
+          const seen = new Set<string>();
+          for (let cur: string | undefined = id; cur && !seen.has(cur); ) {
+            seen.add(cur);
+            const rec: Block | undefined = next.get(cur) ?? base.get(cur);
+            if (!rec) return undefined;
+            if (rec.parent_id === pageId) return cur;
+            cur = rec.parent_id;
+          }
+          return undefined;
+        };
+        const changedTop = new Set([...ids].flatMap((id) => top(id) ?? []));
+        const before = page?.content ?? [];
+        for (const id of nextPage.content) if (!before.includes(id)) changedTop.add(id);
+        for (const id of before) if (!nextPage.content.includes(id)) changedTop.add(id);
+        base = next;
+        page = nextPage;
+        const update: RemoteUpdate = { doc: editorDoc(nextPage, next), changed: [...changedTop], title: plainText(nextPage.properties.title) };
+        for (const l of listeners) l(update);
+      });
+    });
+
     return {
       blocks: base,
-      save(doc: EditorBlock[]): Promise<void> {
-        const run = queue.then(() => saveNow(doc));
-        queue = run.catch(() => {});
-        return run;
+      save: (doc: EditorBlock[]): Promise<void> => enqueue(() => saveNow(doc)),
+      onRemote(listener: (u: RemoteUpdate) => void) {
+        listeners.add(listener);
+        return () => void listeners.delete(listener);
       },
+      close: () => offStore(),
     };
   }
 
@@ -275,6 +464,12 @@ export function createWorkspace(store: LocalStore) {
 
   return {
     getSpace,
+    listSpaces,
+    setCurrentSpace,
+    sharedPages,
+    roleOf,
+    untouchedBootstrap,
+    forget,
     bootstrap,
     pageTree,
     getBlock,

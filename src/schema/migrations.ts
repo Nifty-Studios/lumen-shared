@@ -41,5 +41,26 @@ export const serverMigrations: Migration[] = [
       "CREATE UNIQUE INDEX `server_ops_id_unique` ON `server_ops` (`id`);",
       "CREATE INDEX `server_ops_device_idx` ON `server_ops` (`device_id`,`seq`);"
     ]
+  },
+  {
+    "tag": "0001_known_inertia",
+    "statements": [
+      "CREATE TABLE `invites` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`email` text NOT NULL,\n\t`kind` text NOT NULL,\n\t`target_id` text NOT NULL,\n\t`space_id` text NOT NULL,\n\t`role` text NOT NULL,\n\t`invited_by` text NOT NULL,\n\t`created_at` integer NOT NULL\n);",
+      "CREATE INDEX `invites_email_idx` ON `invites` (`email`);",
+      "CREATE INDEX `invites_target_idx` ON `invites` (`target_id`);",
+      "CREATE TABLE `page_shares` (\n\t`page_id` text NOT NULL,\n\t`user_id` text NOT NULL,\n\t`space_id` text NOT NULL,\n\t`role` text NOT NULL,\n\t`added_at` integer NOT NULL,\n\tPRIMARY KEY(`page_id`, `user_id`)\n);",
+      "CREATE INDEX `page_shares_user_idx` ON `page_shares` (`user_id`);",
+      "CREATE TABLE `server_records` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`table_name` text NOT NULL,\n\t`space_id` text,\n\t`parent_id` text,\n\t`parent_table` text,\n\t`type` text,\n\t`clocks` text NOT NULL\n);",
+      "CREATE INDEX `server_records_parent_idx` ON `server_records` (`parent_id`);",
+      "CREATE TABLE `sessions` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`user_id` text NOT NULL,\n\t`token_hash` text NOT NULL,\n\t`device_name` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`last_seen_at` integer NOT NULL\n);",
+      "CREATE UNIQUE INDEX `sessions_token_hash_unique` ON `sessions` (`token_hash`);",
+      "CREATE INDEX `sessions_user_idx` ON `sessions` (`user_id`);",
+      "CREATE TABLE `space_members` (\n\t`space_id` text NOT NULL,\n\t`user_id` text NOT NULL,\n\t`role` text NOT NULL,\n\t`added_at` integer NOT NULL,\n\tPRIMARY KEY(`space_id`, `user_id`)\n);",
+      "CREATE INDEX `space_members_user_idx` ON `space_members` (`user_id`);",
+      "CREATE TABLE `users` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`email` text NOT NULL,\n\t`name` text NOT NULL,\n\t`password_hash` text NOT NULL,\n\t`created_at` integer NOT NULL\n);",
+      "CREATE UNIQUE INDEX `users_email_unique` ON `users` (`email`);",
+      "ALTER TABLE `server_ops` ADD `space_id` text;",
+      "CREATE INDEX `server_ops_space_idx` ON `server_ops` (`space_id`,`seq`);"
+    ]
   }
 ];

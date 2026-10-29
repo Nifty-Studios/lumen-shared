@@ -5,7 +5,8 @@ import { nodeDriver } from "./test-driver";
 describe("local client", () => {
   it("bootstraps a workspace, edits pages and searches them", async () => {
     const lumen = createLumen(nodeDriver());
-    const space = await lumen.start();
+    expect(await lumen.start()).toEqual({ needsAuth: false }); // no server configured: no sign-in
+    const space = (await lumen.getSpace())!;
     expect(space.name).toBe("My workspace");
 
     const tree = await lumen.pageTree(space);
