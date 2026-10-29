@@ -3,7 +3,7 @@
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { Block as EditorBlock } from "@blocknote/core";
 import { uuidv7 } from "../ids";
-import type { Json } from "../model";
+import type { BlockType, Icon, Json } from "../model";
 import { setPath, type FieldChange, type RecordWrite } from "../ops";
 import { plainText, richText } from "../text";
 import { block, space, type Block, type Space } from "../schema/client";
@@ -56,7 +56,28 @@ export function createWorkspace(store: LocalStore) {
     const now = Date.now();
     const spaceId = uuidv7();
     const pageId = uuidv7();
-    const textId = uuidv7();
+    const welcome: [BlockType, string, Record<string, Json>?][] = [
+      ["text", "Lumen keeps every note on this device and syncs quietly in the background. Nothing here needs the internet."],
+      ["callout", "Press / anywhere to add headings, lists, to-dos, callouts, code and more.", { callout_icon: { type: "icon", name: "lightbulb" } }],
+      ["sub_header", "A few things to try"],
+      ["to_do", "Click anywhere below the last line to keep writing"],
+      ["to_do", "Open Settings at the bottom of the sidebar and pick a mood for your sky"],
+      ["to_do", "Search everything with Ctrl K"],
+      ["to_do", "Export a backup from Settings, then restore it on any device, even offline"],
+      ["quote", "The sky follows your real sun and weather. Change it whenever you like."],
+    ];
+    const blocks = welcome.map(([type, text, format]) => ({ id: uuidv7(), type, text, format: format ?? {} }));
+    const record = (values: Record<string, Json>): Record<string, Json> => ({
+      space_id: spaceId,
+      content: [],
+      format: {},
+      parent_table: "block",
+      collection_id: null,
+      alive: true,
+      created_time: now,
+      last_edited_time: now,
+      ...values,
+    });
     await write([
       {
         table: "space",
@@ -66,41 +87,49 @@ export function createWorkspace(store: LocalStore) {
       {
         table: "block",
         id: pageId,
-        changes: fields({
-          space_id: spaceId,
-          type: "page",
-          properties: { title: richText("Welcome to Lumen") },
-          content: [textId],
-          format: { icon: { type: "emoji", value: "👋" } },
-          parent_id: spaceId,
-          parent_table: "space",
-          collection_id: null,
-          alive: true,
-          created_time: now,
-          last_edited_time: now,
-        }),
+        changes: fields(
+          record({
+            type: "page",
+            properties: { title: richText("Welcome to Lumen") },
+            content: blocks.map((b) => b.id),
+            format: { icon: { type: "icon", name: "sparkles", color: "yellow" } },
+            parent_id: spaceId,
+            parent_table: "space",
+          }),
+        ),
       },
-      {
-        table: "block",
-        id: textId,
-        changes: fields({
-          space_id: spaceId,
-          type: "text",
-          properties: { title: richText("Everything here is stored on this device. Type / for blocks.") },
-          content: [],
-          format: {},
-          parent_id: pageId,
-          parent_table: "block",
-          collection_id: null,
-          alive: true,
-          created_time: now,
-          last_edited_time: now,
-        }),
-      },
+      ...blocks.map((b) => ({
+        table: "block" as const,
+        id: b.id,
+        changes: fields(record({ type: b.type, properties: { title: richText(b.text) }, format: b.format, parent_id: pageId })),
+      })),
     ]);
     return (await getSpace())!;
   }
 
+  /** Alive child pages of a page, in order (shown under "Pages inside"). */
+  async function childPages(pageId: string): Promise<Block[]> {
+    const parent = await getBlock(pageId);
+    if (!parent) return [];
+    const rows = await db.select().from(block).where(and(eq(block.parent_id, pageId), eq(block.type, "page"), eq(block.alive, true)));
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    return parent.content.flatMap((id) => byId.get(id) ?? []);
+  }
+
+  /** The page's ancestors from the top level down (for breadcrumbs), not including the page. */
+  async function pagePath(pageId: string): Promise<Block[]> {
+    const out: Block[] = [];
+    let cur = await getBlock(pageId);
+    const seen = new Set<string>();
+    while (cur && cur.parent_table === "block" && !seen.has(cur.parent_id)) {
+      seen.add(cur.parent_id);
+      const parent = await getBlock(cur.parent_id);
+      if (!parent) break;
+      if (parent.type === "page") out.unshift(parent);
+      cur = parent;
+    }
+    return out;
+  }
 
   /** The sidebar tree: alive pages under the space, ordered by their parent's list. */
   async function pageTree(s: Space): Promise<PageNode[]> {
@@ -197,13 +226,13 @@ export function createWorkspace(store: LocalStore) {
   const renamePage = (id: string, title: string) =>
     write([{ table: "block", id, changes: fields({ properties: { title: richText(title) }, last_edited_time: Date.now() }) }]);
 
-  const setPageIcon = (id: string, emoji: string | null) =>
+  const setPageIcon = (id: string, icon: Icon | null) =>
     write([
       {
         table: "block",
         id,
         changes: [
-          { path: ["format", "icon"], value: emoji ? { type: "emoji", value: emoji } : null },
+          { path: ["format", "icon"], value: icon },
           { path: ["last_edited_time"], value: Date.now() },
         ],
       },
@@ -244,7 +273,22 @@ export function createWorkspace(store: LocalStore) {
     return rows.flatMap(([pageId, snippet]) => (seen.has(pageId) ? [] : (seen.add(pageId), [{ pageId, snippet }])));
   }
 
-  return { getSpace, bootstrap, pageTree, getBlock, loadPageBlocks, openPage, createPage, renamePage, setPageIcon, setPageAlive, trashedPages, search };
+  return {
+    getSpace,
+    bootstrap,
+    pageTree,
+    getBlock,
+    loadPageBlocks,
+    childPages,
+    pagePath,
+    openPage,
+    createPage,
+    renamePage,
+    setPageIcon,
+    setPageAlive,
+    trashedPages,
+    search,
+  };
 }
 
 export type Workspace = ReturnType<typeof createWorkspace>;

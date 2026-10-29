@@ -12,7 +12,9 @@ import { deriveSearchText } from "../text";
 import { META_KEYS, RECORD_TABLES, field_clock, meta, ops as opsTable } from "../schema/client";
 import type { LumenDb } from "./driver";
 
-export type ChangeListener = (changed: { table: TableName; id: string }[]) => void;
+const OPS_PER_INSERT = 500;
+
+export type ChangeListener =(changed: { table: TableName; id: string }[]) => void;
 
 export class LocalStore {
   private listeners = new Set<ChangeListener>();
@@ -47,9 +49,13 @@ export class LocalStore {
     return this.clock;
   }
 
-  /** Applies ops locally. `remote` ops (from sync) are stored as already synced. */
-  commit = (ops: Op[], { remote = false } = {}): Promise<void> => {
-    const run = this.queue.then(() => this.commitNow(ops, remote));
+  /**
+   * Applies ops locally. `remote` ops come from elsewhere (sync, a backup): the clock moves
+   * past them. They are stored as already synced unless `synced` says otherwise; a restored
+   * backup passes synced: false so its ops reach the server (which ignores duplicates).
+   */
+  commit = (ops: Op[], { remote = false, synced = remote }: { remote?: boolean; synced?: boolean } = {}): Promise<void> => {
+    const run = this.queue.then(() => this.commitNow(ops, remote, synced));
     this.queue = run.catch(() => {});
     return run;
   };
@@ -60,7 +66,7 @@ export class LocalStore {
     if (ops.length) await this.commit(ops);
   };
 
-  private async commitNow(ops: Op[], remote: boolean) {
+  private async commitNow(ops: Op[], remote: boolean, synced: boolean) {
     const { db } = this;
     const c = this.getClock();
     if (remote) for (const op of ops) c.receive(op.hlc);
@@ -105,11 +111,16 @@ export class LocalStore {
       changed.push({ table, id });
     }
 
+    // Chunked: SQLite caps the number of bound variables per statement.
+    for (let i = 0; i < ops.length; i += OPS_PER_INSERT) {
+      statements.push(
+        db
+          .insert(opsTable)
+          .values(ops.slice(i, i + OPS_PER_INSERT).map((op) => ({ ...op, table_name: op.table, synced })))
+          .onConflictDoNothing(),
+      );
+    }
     statements.push(
-      db
-        .insert(opsTable)
-        .values(ops.map((op) => ({ ...op, table_name: op.table, synced: remote })))
-        .onConflictDoNothing(),
       db
         .insert(meta)
         .values({ key: META_KEYS.lastHlc, value: c.current })
