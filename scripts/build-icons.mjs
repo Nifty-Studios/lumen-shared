@@ -24,6 +24,8 @@ const UI = [
   "calendar", "grip-vertical", "external-link", "notebook-text", "sprout", "mountain", "hourglass",
   "house", "folder", "book-open", "bookmark", "pin", "star", "flame", "heart", "arrow-left", "copy",
   "eye", "eye-off", "keyboard", "type", "rainbow", "waves-horizontal", "corner-down-left", "clock-arrow-left",
+  "chevrons-up-down", "user-plus", "share-2", "log-in", "log-out", "pencil", "circle-user", "user-round",
+  "wifi", "wifi-off", "users", "mail", "lock", "crown", "link", "layers",
 ];
 
 /** Offered in the page icon picker, in picker order. */

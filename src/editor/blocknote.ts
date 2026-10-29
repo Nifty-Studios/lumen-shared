@@ -2,3 +2,4 @@
 // and the mobile webview): it loads @blocknote/core at runtime, which native screens must not.
 export * from "./schema";
 export * from "./slash";
+export * from "./live";
