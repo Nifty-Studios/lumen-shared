@@ -46,6 +46,7 @@ describe("sky", () => {
     expect(noon.phase).toBe("day");
     expect(night.daylight).toBe(0);
     expect(night.phase).toBe("night");
+    expect(night.label).toBe("Night"); // no weather reading, so no claim about clouds
     expect(night.stars).toBeGreaterThan(0.5);
     expect(luminance(hex(noon.skyTop))).toBeGreaterThan(luminance(hex(night.skyTop)));
   });

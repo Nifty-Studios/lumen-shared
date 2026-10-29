@@ -179,8 +179,10 @@ export function computeSky(input: SkyInput = {}): SkyState {
   const moon = moonPhase(now);
   const night = 1 - smoothstep(-8, 3, altitude);
 
+  // Without a weather reading the sky is a guess, so the label only names the time of day.
   const weatherWord = precip !== "none" || storm || fog ? look.label : clouds > 0.75 ? "Overcast" : clouds > 0.4 ? "Cloudy" : "Clear";
-  const label = precip !== "none" || storm || fog ? weatherWord : `${weatherWord} ${PHASE_WORDS[phase]}`;
+  const label =
+    envWeather === "live" && !fresh ? PHASE_WORDS[phase] : precip !== "none" || storm || fog ? weatherWord : `${weatherWord} ${PHASE_WORDS[phase]}`;
 
   return {
     now,
