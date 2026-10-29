@@ -1,10 +1,11 @@
 // Publishes a release build to Cloudflare R2 (bucket lumen-downloads) and refreshes the
 // download page. Each build goes up twice: versioned, and as the stable "latest" link.
 //   node publish-download.mjs --platform windows|android --file <path> --version 1.0.0
+// Also writes latest.json (Windows in-app updates); Android apps read manifest.json.
 // Needs wrangler logged in (`npx wrangler login`).
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -39,6 +40,19 @@ const dir = mkdtempSync(join(tmpdir(), "lumen-publish-"));
 writeFileSync(join(dir, "manifest.json"), JSON.stringify(manifest, null, 2));
 writeFileSync(join(dir, "index.html"), page(manifest));
 put("manifest.json", join(dir, "manifest.json"), "application/json");
+
+// Windows in-app updates read latest.json (the Tauri updater format). The installer's signature
+// (<file>.sig, made at build time with stored/keys/lumen-updater.key) must sit next to it.
+if (platform === "windows") {
+  if (!existsSync(`${file}.sig`)) throw new Error(`Missing ${file}.sig: build with TAURI_SIGNING_PRIVATE_KEY set, or the app can't update to this version.`);
+  const latest = {
+    version,
+    pub_date: new Date().toISOString(),
+    platforms: { "windows-x86_64": { signature: readFileSync(`${file}.sig`, "utf8").trim(), url: `${BASE}/${versioned}` } },
+  };
+  writeFileSync(join(dir, "latest.json"), JSON.stringify(latest, null, 2));
+  put("latest.json", join(dir, "latest.json"), "application/json");
+}
 put("index.html", join(dir, "index.html"), "text/html"); // the page declares utf-8 itself
 console.log(`\nDownload page: ${BASE}/index.html\n${platform}: ${BASE}/${LATEST[platform]}`);
 

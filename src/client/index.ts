@@ -19,6 +19,7 @@ export * from "./migrate";
 export * from "./settings";
 export * from "./store";
 export * from "./sync";
+export * from "./tools";
 export * from "./workspace";
 export type { ImportSummary } from "../import/notion";
 

@@ -26,6 +26,7 @@ const UI = [
   "eye", "eye-off", "keyboard", "type", "rainbow", "waves-horizontal", "corner-down-left", "clock-arrow-left",
   "chevrons-up-down", "user-plus", "share-2", "log-in", "log-out", "pencil", "circle-user", "user-round",
   "wifi", "wifi-off", "users", "mail", "lock", "crown", "link", "layers",
+  "minus", "square", "arrow-up", "square-pen", "key-round", "message-circle", "circle-stop",
 ];
 
 /** Offered in the page icon picker, in picker order. */
