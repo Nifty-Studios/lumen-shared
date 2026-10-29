@@ -46,7 +46,11 @@ export type TextSpan = {
 
 export type RichText = TextSpan[];
 
-export type Icon = { type: "emoji"; value: string } | { type: "file"; file_id: string };
+/** `icon`: an outline icon from icons/data.ts with an optional color token (icons/index.ts). */
+export type Icon =
+  | { type: "icon"; name: string; color?: string }
+  | { type: "emoji"; value: string }
+  | { type: "file"; file_id: string };
 
 export interface BlockProperties {
   title?: RichText;

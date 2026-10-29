@@ -10,7 +10,9 @@
     "./schema/server": "./src/schema/server.ts",
     "./schema/migrations": "./src/schema/migrations.ts",
     "./editor": "./src/editor/index.ts",
-    "./client": "./src/client/index.ts"
+    "./client": "./src/client/index.ts",
+    "./icons": "./src/icons/index.ts",
+    "./ambient": "./src/ambient/index.ts"
   },
   "files": [
     "src",
@@ -22,13 +24,15 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate --config drizzle.client.config.ts && drizzle-kit generate --config drizzle.server.config.ts && node scripts/bundle-migrations.mjs",
-    "db:bundle": "node scripts/bundle-migrations.mjs"
+    "db:bundle": "node scripts/bundle-migrations.mjs",
+    "icons": "node scripts/build-icons.mjs"
   },
   "peerDependencies": {
     "@blocknote/core": ">=0.56.0",
     "drizzle-orm": ">=0.45.0"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -36,6 +40,7 @@
     "@types/node": "^26.6.6",
     "drizzle-kit": "^0.31.11",
     "drizzle-orm": "^0.45.4",
+    "lucide": "^1.62.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   },
