@@ -32,6 +32,8 @@ export interface LumenSettings {
   sound: boolean;
   /** Mobile: the page is see-through glass over the live sky while writing (desktop always is). */
   skyBehindPage: boolean;
+  /** The first-launch welcome animation has played on this device. */
+  welcomed: boolean;
 }
 
 export const DEFAULT_SETTINGS: LumenSettings = {
@@ -45,6 +47,7 @@ export const DEFAULT_SETTINGS: LumenSettings = {
   location: null,
   sound: false,
   skyBehindPage: false,
+  welcomed: false,
 };
 
 export interface Mood {
