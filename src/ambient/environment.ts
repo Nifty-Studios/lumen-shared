@@ -30,6 +30,8 @@ export interface LumenSettings {
   location: SavedLocation | null;
   /** Soft synthesized rain and wind sound, desktop only. */
   sound: boolean;
+  /** Mobile: the page is see-through glass over the live sky while writing (desktop always is). */
+  skyBehindPage: boolean;
 }
 
 export const DEFAULT_SETTINGS: LumenSettings = {
@@ -42,6 +44,7 @@ export const DEFAULT_SETTINGS: LumenSettings = {
   liveWeather: true,
   location: null,
   sound: false,
+  skyBehindPage: false,
 };
 
 export interface Mood {
