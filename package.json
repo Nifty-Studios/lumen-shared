@@ -10,6 +10,7 @@
     "./schema/server": "./src/schema/server.ts",
     "./schema/migrations": "./src/schema/migrations.ts",
     "./editor": "./src/editor/index.ts",
+    "./editor/blocknote": "./src/editor/blocknote.ts",
     "./client": "./src/client/index.ts",
     "./icons": "./src/icons/index.ts",
     "./ambient": "./src/ambient/index.ts"
