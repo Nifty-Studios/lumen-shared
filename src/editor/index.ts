@@ -2,3 +2,5 @@
 // Kept out of the root export so the server never needs @blocknote/core.
 export * from "./convert";
 export * from "./diff";
+export * from "./schema";
+export * from "./slash";

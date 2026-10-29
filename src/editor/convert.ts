@@ -4,6 +4,7 @@
 import type { Block as EditorBlock, PartialBlock, StyledText, Link, Styles } from "@blocknote/core";
 import type { BlockFormat, BlockProperties, BlockType, Mark, RichText, TextSpan } from "../index";
 import { plainText, richText } from "../index";
+import { resolveIcon } from "../icons";
 import type { Block } from "../schema/client";
 
 type InlineContent = (StyledText<any> | Link<any>)[];
@@ -74,6 +75,7 @@ const TO_EDITOR: Partial<Record<BlockType, string>> = {
   code: "codeBlock",
   divider: "divider",
   image: "image",
+  callout: "callout",
 };
 
 const FROM_EDITOR: Record<string, BlockType> = Object.fromEntries(
@@ -118,6 +120,9 @@ export function toEditorBlock(block: Block, byId: Map<string, Block>): PartialBl
       props.caption = plainText(p.caption);
       content = undefined;
       break;
+    case "callout":
+      props.icon = resolveIcon(block.format.callout_icon, "lightbulb").name;
+      break;
   }
 
   const children = block.content
@@ -160,6 +165,7 @@ export function fromEditorBlock(b: EditorBlock): BlockFields {
     properties.title = inlineToRichText(b.content as InlineContent);
   }
   if (b.type === "checkListItem") properties.checked = Boolean(props.checked);
+  if ((b.type as string) === "callout") format.callout_icon = { type: "icon", name: String(props.icon || "lightbulb") };
 
   return { type, properties, format };
 }
