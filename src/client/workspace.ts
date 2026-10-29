@@ -10,12 +10,16 @@ import { plainText, richText } from "../text";
 import { block, collection, collection_view, field_clock, meta, ops, space, type Block, type Space } from "../schema/client";
 import { diffPage } from "../editor/diff";
 import { isEditorBlock, toEditorBlock } from "../editor/convert";
+import { parseMarkdown, type MdBlock } from "../import/markdown";
 import type { LocalStore } from "./store";
 
 const fields = (values: Record<string, Json>): FieldChange[] =>
   Object.entries(values).map(([field, value]) => ({ path: [field], value }));
 
 export const pageTitle = (page: Pick<Block, "properties">) => plainText(page.properties.title) || "Untitled";
+
+/** Groups are pages flagged as sidebar sections: they hold pages and are never opened. */
+export const isGroup = (page: Pick<Block, "format">) => page.format.group === true;
 
 export interface PageNode {
   page: Block;
@@ -412,6 +416,112 @@ export function createWorkspace(store: LocalStore, access: () => AccessView = ()
     return id;
   }
 
+  /** A group: a named section in the sidebar that holds pages, without being a page itself. */
+  async function createGroup(s: Space, name: string): Promise<string> {
+    const id = await createPage(s, null);
+    await write([
+      {
+        table: "block",
+        id,
+        changes: [
+          { path: ["format", "group"], value: true },
+          { path: ["properties"], value: { title: richText(name) } },
+        ],
+      },
+    ]);
+    return id;
+  }
+
+  /**
+   * Moves a page under another page or group (`to`), or to the top of its workspace (`null`),
+   * at the end of the list there. Refuses to move a page into itself or across workspaces.
+   */
+  async function movePage(id: string, to: string | null): Promise<void> {
+    const page = await getBlock(id);
+    if (!page) return;
+    const target = to ? await getBlock(to) : undefined;
+    if (to && !target) return;
+    if (target && target.space_id !== page.space_id) throw new Error("Pages can only move within their workspace.");
+    for (let cur = target; cur; cur = cur.parent_table === "block" ? await getBlock(cur.parent_id) : undefined)
+      if (cur.id === id) throw new Error("A page can't go inside itself.");
+    const from = page.parent_table === "block" ? page.parent_id : null;
+    if (from === (to ?? null)) return;
+
+    const [home] = await db.select().from(space).where(eq(space.id, page.space_id));
+    const now = Date.now();
+    const writes: RecordWrite[] = [];
+    if (from) {
+      const old = await getBlock(from);
+      if (old) writes.push({ table: "block", id: old.id, changes: fields({ content: old.content.filter((c) => c !== id), last_edited_time: now }) });
+    } else if (home) writes.push({ table: "space", id: home.id, changes: fields({ pages: home.pages.filter((p) => p !== id), last_edited_time: now }) });
+    if (target) writes.push({ table: "block", id: target.id, changes: fields({ content: [...target.content.filter((c) => c !== id), id], last_edited_time: now }) });
+    else if (home) writes.push({ table: "space", id: home.id, changes: fields({ pages: [...home.pages.filter((p) => p !== id), id], last_edited_time: now }) });
+    writes.push({
+      table: "block",
+      id,
+      changes: fields({ parent_id: target ? target.id : page.space_id, parent_table: target ? "block" : "space", last_edited_time: now }),
+    });
+    await write(writes);
+  }
+
+  /**
+   * Writes Markdown into a page: after what's there (`append`), or in place of its text
+   * (`replace`; sub-pages stay). Used by the AI connection.
+   */
+  async function writeMarkdown(pageId: string, md: string, mode: "append" | "replace" = "append"): Promise<void> {
+    const page = await getBlock(pageId);
+    if (!page) throw new Error("No such page.");
+    const now = Date.now();
+    const writes: RecordWrite[] = [];
+    const add = (blocks: MdBlock[], parentId: string): string[] =>
+      blocks.map((b) => {
+        const id = uuidv7();
+        const properties: Record<string, Json> = {};
+        const format: Record<string, Json> = {};
+        if (b.type === "image") {
+          properties.source = /^(https?:|data:)/i.test(b.src ?? "") ? b.src! : "";
+          properties.caption = richText(b.caption ?? "");
+        } else properties.title = (b.title ?? []) as Json;
+        if (b.type === "to_do") properties.checked = Boolean(b.checked);
+        if (b.type === "code") properties.language = b.language ?? "text";
+        if (b.type === "callout") format.callout_icon = { type: "icon", name: "lightbulb" };
+        const content = add(b.children, id);
+        writes.push({
+          table: "block",
+          id,
+          changes: fields({
+            space_id: page.space_id,
+            type: b.type,
+            properties,
+            format,
+            content,
+            parent_id: parentId,
+            parent_table: "block",
+            collection_id: null,
+            alive: true,
+            created_time: now,
+            last_edited_time: now,
+          }),
+        });
+        return id;
+      });
+    const fresh = add(parseMarkdown(md), pageId);
+    let kept = page.content;
+    if (mode === "replace") {
+      const existing = await loadPageBlocks(pageId);
+      const top = page.content.filter((id) => existing.has(id));
+      for (const id of top) writes.push({ table: "block", id, changes: fields({ alive: false, last_edited_time: now }) });
+      kept = page.content.filter((id) => !existing.has(id)); // sub-pages
+      writes.push({ table: "block", id: pageId, changes: fields({ content: [...fresh, ...kept], last_edited_time: now }) });
+    } else {
+      const existing = await loadPageBlocks(pageId);
+      const text = kept.filter((id) => existing.has(id));
+      const pages = kept.filter((id) => !existing.has(id));
+      writes.push({ table: "block", id: pageId, changes: fields({ content: [...text, ...fresh, ...pages], last_edited_time: now }) });
+    }
+    await write(writes);
+  }
+
   const renamePage = (id: string, title: string) =>
     write([{ table: "block", id, changes: fields({ properties: { title: richText(title) }, last_edited_time: Date.now() }) }]);
 
@@ -478,6 +588,9 @@ export function createWorkspace(store: LocalStore, access: () => AccessView = ()
     pagePath,
     openPage,
     createPage,
+    createGroup,
+    movePage,
+    writeMarkdown,
     renamePage,
     setPageIcon,
     setPageAlive,

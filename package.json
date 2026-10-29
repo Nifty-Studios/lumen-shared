@@ -13,7 +13,8 @@
     "./editor/blocknote": "./src/editor/blocknote.ts",
     "./client": "./src/client/index.ts",
     "./icons": "./src/icons/index.ts",
-    "./ambient": "./src/ambient/index.ts"
+    "./ambient": "./src/ambient/index.ts",
+    "./export": "./src/export/markdown.ts"
   },
   "files": [
     "src",
