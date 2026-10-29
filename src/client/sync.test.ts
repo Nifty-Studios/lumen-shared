@@ -68,6 +68,36 @@ describe("sync client", () => {
     expect(phone.sync!.current.state).toBe("idle");
   });
 
+  it("doesn't write a stale editor's blocks over edits synced from another device", async () => {
+    const server = fakeServer("secret");
+    const sync = { url: "https://sync.test", token: "secret", fetch: server.fetch };
+    const para = (id: string, text: string) => ({ id, type: "paragraph", props: {}, content: [{ type: "text", text, styles: {} }], children: [] });
+    const texts = async (lumen: ReturnType<typeof createLumen>, pageId: string) =>
+      [...(await lumen.loadPageBlocks(pageId)).values()].map((b) => b.properties.title?.[0]?.text).sort();
+
+    const desktop = createLumen(nodeDriver(), { sync });
+    const space = await desktop.start();
+    const pageId = await desktop.createPage(space, null);
+    await (await desktop.openPage(pageId)).save([para("a", "one"), para("b", "two")] as never);
+    await desktop.sync!.sync();
+
+    const phone = createLumen(nodeDriver(), { sync });
+    await phone.start();
+
+    // Desktop has the page open. Meanwhile the phone edits block a.
+    const open = await desktop.openPage(pageId);
+    await (await phone.openPage(pageId)).save([para("a", "one (phone)"), para("b", "two")] as never);
+    await phone.sync!.sync();
+    await desktop.sync!.sync();
+
+    // Desktop's editor still shows the old block a, and the user edits block b.
+    await open.save([para("a", "one"), para("b", "two (desktop)")] as never);
+    await desktop.sync!.sync();
+    await phone.sync!.sync();
+
+    for (const lumen of [desktop, phone]) expect(await texts(lumen, pageId)).toEqual(["one (phone)", "two (desktop)"]);
+  });
+
   it("reports a bad token as an error and keeps ops for later", async () => {
     const server = fakeServer("secret");
     const lumen = createLumen(nodeDriver(), { sync: { url: "https://sync.test", token: "wrong", fetch: server.fetch } });

@@ -13,7 +13,7 @@ describe("local client", () => {
 
     const id = await lumen.createPage((await lumen.getSpace())!, null);
     await lumen.renamePage(id, "Groceries");
-    await lumen.savePage(id, [
+    await (await lumen.openPage(id)).save([
       { id: "b1", type: "paragraph", props: {}, content: [{ type: "text", text: "oat milk and bread", styles: {} }], children: [] },
     ] as never);
 

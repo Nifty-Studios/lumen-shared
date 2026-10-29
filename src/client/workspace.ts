@@ -4,7 +4,7 @@ import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { Block as EditorBlock } from "@blocknote/core";
 import { uuidv7 } from "../ids";
 import type { Json } from "../model";
-import type { FieldChange } from "../ops";
+import { setPath, type FieldChange, type RecordWrite } from "../ops";
 import { plainText, richText } from "../text";
 import { block, space, type Block, type Space } from "../schema/client";
 import { diffPage } from "../editor/diff";
@@ -23,6 +23,21 @@ export interface PageNode {
 export interface SearchHit {
   pageId: string;
   snippet: string;
+}
+
+export type PageSession = Awaited<ReturnType<Workspace["openPage"]>>;
+
+/** The base after a save: the previous base with the session's own writes applied. */
+function advanceBase(base: Map<string, Block>, pageId: string, writes: RecordWrite[]): Map<string, Block> {
+  const next = new Map(base);
+  for (const w of writes) {
+    if (w.table !== "block" || w.id === pageId) continue;
+    const record = structuredClone(next.get(w.id) ?? { id: w.id }) as Record<string, unknown>;
+    for (const change of w.changes) setPath(record, change.path, change.value);
+    if (record.alive === false) next.delete(w.id);
+    else next.set(w.id, record as Block);
+  }
+  return next;
 }
 
 export function createWorkspace(store: LocalStore) {
@@ -125,11 +140,29 @@ export function createWorkspace(store: LocalStore) {
     return out;
   }
 
-  async function savePage(pageId: string, doc: EditorBlock[]) {
-    const page = await getBlock(pageId);
-    if (!page) return;
-    const stored = await loadPageBlocks(pageId);
-    await write(diffPage(page, stored, doc));
+  /**
+   * An edit session for one open page. Saves diff the editor's document against what this
+   * session last loaded or saved, not against the current rows, so changes synced in from
+   * another device to blocks this editor didn't touch are never written back over.
+   */
+  async function openPage(pageId: string) {
+    let base = await loadPageBlocks(pageId);
+    let queue: Promise<unknown> = Promise.resolve();
+    const saveNow = async (doc: EditorBlock[]) => {
+      const page = await getBlock(pageId);
+      if (!page) return;
+      const writes = diffPage(page, base, doc);
+      await write(writes);
+      base = advanceBase(base, pageId, writes);
+    };
+    return {
+      blocks: base,
+      save(doc: EditorBlock[]): Promise<void> {
+        const run = queue.then(() => saveNow(doc));
+        queue = run.catch(() => {});
+        return run;
+      },
+    };
   }
 
   async function createPage(s: Space, parentId: string | null): Promise<string> {
@@ -211,7 +244,7 @@ export function createWorkspace(store: LocalStore) {
     return rows.flatMap(([pageId, snippet]) => (seen.has(pageId) ? [] : (seen.add(pageId), [{ pageId, snippet }])));
   }
 
-  return { getSpace, bootstrap, pageTree, getBlock, loadPageBlocks, savePage, createPage, renamePage, setPageIcon, setPageAlive, trashedPages, search };
+  return { getSpace, bootstrap, pageTree, getBlock, loadPageBlocks, openPage, createPage, renamePage, setPageIcon, setPageAlive, trashedPages, search };
 }
 
 export type Workspace = ReturnType<typeof createWorkspace>;
