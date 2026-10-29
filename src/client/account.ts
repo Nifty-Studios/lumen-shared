@@ -32,7 +32,7 @@ export interface Account {
 
 export type Access = Omit<Me, "user">;
 
-const KEYS = { account: "account", access: "access", skipped: "auth_skipped", remindAt: "auth_remind_at" } as const;
+const KEYS = { account: "account", previous: "previous_account", access: "access", skipped: "auth_skipped", remindAt: "auth_remind_at" } as const;
 const REMIND_EVERY = 3 * 86_400_000;
 
 /** A failed account call, with a message fit to show as is. */
@@ -48,6 +48,8 @@ export class AccountError extends Error {
 
 export function createAccount(db: LumenDb, server: ServerConfig | undefined) {
   let account: Account | undefined;
+  /** Signed out, but the device still holds this account's notes (and unsent changes). */
+  let previous: Account | undefined;
   let access: Access = { spaces: [], pages: [] };
   let skipped = false;
   let remindAt = 0;
@@ -67,6 +69,7 @@ export function createAccount(db: LumenDb, server: ServerConfig | undefined) {
       return raw === undefined ? undefined : JSON.parse(raw);
     };
     account = get(KEYS.account);
+    previous = get(KEYS.previous);
     access = get(KEYS.access) ?? { spaces: [], pages: [] };
     skipped = get(KEYS.skipped) ?? false;
     remindAt = get(KEYS.remindAt) ?? 0;
@@ -94,12 +97,8 @@ export function createAccount(db: LumenDb, server: ServerConfig | undefined) {
     return request<T>(path, { ...init, token: account.token });
   };
 
-  async function signedIn(next: Account) {
-    account = next;
-    skipped = false;
-    await db.batch([save(KEYS.account, next), save(KEYS.skipped, false)]);
-    emit();
-  }
+  const authenticate = (path: "/auth/signup" | "/auth/login", input: object) =>
+    request(path, { method: "POST", body: JSON.stringify({ ...input, device_name: server?.deviceName ?? "Lumen" }), schema: authResponseSchema });
 
   const people = (path: string, method = "GET", body?: unknown) =>
     authed(path, { method, schema: peopleSchema, ...(body ? { body: JSON.stringify(body) } : {}) }).then((r) => r.people as Person[]);
@@ -119,29 +118,44 @@ export function createAccount(db: LumenDb, server: ServerConfig | undefined) {
     /** Whether this build talks to a server at all. */
     available: !!server,
 
-    async signUp(input: { email: string; password: string; name: string }) {
-      const res = await request("/auth/signup", {
-        method: "POST",
-        body: JSON.stringify({ ...input, device_name: server?.deviceName ?? "Lumen" }),
-        schema: authResponseSchema,
-      });
-      await signedIn(res);
+    /** The account whose notes are on this device while nobody is signed in. */
+    get previous() {
+      return previous;
     },
-    async logIn(input: { email: string; password: string }) {
-      const res = await request("/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ ...input, device_name: server?.deviceName ?? "Lumen" }),
-        schema: authResponseSchema,
-      });
-      await signedIn(res);
+    /** Checks credentials and starts a session, without making it this device's account yet. */
+    signUp: (input: { email: string; password: string; name: string }) => authenticate("/auth/signup", input),
+    logIn: (input: { email: string; password: string }) => authenticate("/auth/login", input),
+    /** Makes a session this device's account (the caller has made the local data theirs). */
+    async adopt(next: Account) {
+      account = next;
+      previous = undefined;
+      skipped = false;
+      await db.batch([save(KEYS.account, next), save(KEYS.skipped, false)]);
+      await db.delete(meta).where(eq(meta.key, KEYS.previous));
+      emit();
     },
-    /** Forgets the session on this device (the caller clears local data). */
-    async logOut() {
-      if (account) await authed("/auth/logout", { method: "POST" }).catch(() => {});
+    /** Ends a session on the server (best effort). */
+    revoke: (token: string) => request("/auth/logout", { method: "POST", token }).catch(() => {}),
+    /**
+     * Signs out but keeps the notes here, usable offline. The session is kept too, only to
+     * send this account's unsent changes if someone else signs in later.
+     */
+    async signOutLocally() {
+      if (!account) return;
+      previous = account;
       account = undefined;
       access = { spaces: [], pages: [] };
+      skipped = true;
+      remindAt = Date.now() + REMIND_EVERY;
+      await db.batch([save(KEYS.previous, previous), save(KEYS.skipped, true), save(KEYS.remindAt, remindAt)]);
       await db.delete(meta).where(inArray(meta.key, [KEYS.account, KEYS.access]));
       emit();
+    },
+    /** Forgets the previous account entirely (its session ends). */
+    async forgetPrevious() {
+      if (previous) await request("/auth/logout", { method: "POST", token: previous.token }).catch(() => {});
+      previous = undefined;
+      await db.delete(meta).where(eq(meta.key, KEYS.previous));
     },
     /** The server said the session is no longer valid (signed out elsewhere, or expired). */
     async expire() {

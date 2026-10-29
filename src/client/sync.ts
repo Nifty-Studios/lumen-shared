@@ -176,18 +176,27 @@ export class SyncClient {
     }
   }
 
-  private async request(path: string, init?: RequestInit) {
+  /**
+   * Sends this device's unsent changes using another session's token (the account that was
+   * signed in before), so they reach that account before someone else takes over the device.
+   * Throws if they can't be sent.
+   */
+  async pushAs(token: string) {
+    await this.push(token);
+  }
+
+  private async request(path: string, init?: RequestInit, token = this.config.token()) {
     const doFetch = this.config.fetch ?? fetch;
     const res = await doFetch(this.config.url.replace(/\/+$/, "") + path, {
       ...init,
-      headers: { authorization: `Bearer ${this.config.token() ?? ""}`, "content-type": "application/json" },
+      headers: { authorization: `Bearer ${token ?? ""}`, "content-type": "application/json" },
     });
     if (res.status === 401) throw new Unauthorized();
     if (!res.ok) throw new Error(`Sync server answered ${res.status} for ${path}`);
     return res.json();
   }
 
-  private async push() {
+  private async push(token?: string) {
     const { db } = this.store;
     for (;;) {
       const rows = await db
@@ -201,7 +210,7 @@ export class SyncClient {
         device_id: this.store.deviceId,
         ops: rows.map(({ table_name, synced: _, ...op }) => ({ ...op, table: table_name })),
       };
-      const res = pushResponseSchema.parse(await this.request("/sync/push", { method: "POST", body: JSON.stringify(body) }));
+      const res = pushResponseSchema.parse(await this.request("/sync/push", { method: "POST", body: JSON.stringify(body) }, token ?? this.config.token()));
       // Refused ops are marked synced too: retrying them would never succeed.
       await db.update(opsTable).set({ synced: true }).where(inArray(opsTable.id, rows.map((r) => r.id)));
       if (res.rejected.length) this.config.onRejected?.(res.rejected);

@@ -22,10 +22,18 @@ export * from "./sync";
 export * from "./workspace";
 export type { ImportSummary } from "../import/notion";
 
-/** Signing out would lose changes the server hasn't received yet. */
-export class UnsyncedChangesError extends Error {
-  constructor(readonly pending: number) {
-    super(`${pending} change${pending === 1 ? "" : "s"} haven't synced yet`);
+/**
+ * Someone else is signing in, but the notes on this device belong to the account that was
+ * signed in before and some of its changes couldn't be sent (usually: offline). Retry when
+ * online, or pass `discardUnsent` to drop them.
+ */
+export class AccountSwitchError extends Error {
+  constructor(
+    readonly pending: number,
+    /** Email of the account the unsent changes belong to. */
+    readonly owner: string,
+  ) {
+    super(`${pending} change${pending === 1 ? "" : "s"} by ${owner} haven't synced yet`);
   }
 }
 
@@ -76,7 +84,7 @@ export function createLumen(driver: SqlDriver, options: { server?: ServerConfig 
 
   const unsyncedCount = async () => (await db.select({ n: count() }).from(ops).where(eq(ops.synced, false)))[0]?.n ?? 0;
 
-  /** Removes every record and the sync state from this device (settings and the device id stay). */
+  /** Removes every record and the sync state from this device (settings stay), and gives it a new device id. */
   async function clearDevice() {
     await db.batch([
       db.delete(block),
@@ -85,8 +93,26 @@ export function createLumen(driver: SqlDriver, options: { server?: ServerConfig 
       db.delete(collection_view),
       db.delete(field_clock),
       db.delete(ops),
-      db.delete(meta).where(inArray(meta.key, [META_KEYS.syncCursor, "current_space", "bootstrap", "access"])),
+      db.delete(meta).where(inArray(meta.key, [META_KEYS.syncCursor, META_KEYS.deviceId, "current_space", "bootstrap", "access"])),
     ]);
+    // A new identity: the server never sends a device its own ops back, and this device's old
+    // ops belong to the account that just left, which may come back.
+    await store.initClock();
+  }
+
+  /**
+   * After signing in: drop the first-launch workspace if it was never used and the account
+   * already has one, claim workspaces from before accounts, then sync.
+   */
+  async function connect() {
+    await applyAccess();
+    const unused = await workspace.untouchedBootstrap();
+    if (unused && account.access.spaces.some((s) => s.id !== unused)) await workspace.forget({ space: unused });
+    if ((await account.claimLegacy().catch(() => 0)) > 0) await applyAccess();
+    await sync?.sync().catch(() => {});
+    // An account with nothing in it yet gets a first workspace, sent right away.
+    await workspace.bootstrap();
+    await sync?.sync().catch(() => {});
   }
 
   return {
@@ -112,7 +138,7 @@ export function createLumen(driver: SqlDriver, options: { server?: ServerConfig 
 
     /**
      * Migrate, load the device clock, settings and account. `needsAuth` means first launch with
-     * nobody signed in: show sign-in, then call connect() or continueSignedOut().
+     * nobody signed in: show sign-in, then call signUp()/logIn() or continueSignedOut().
      */
     async start(): Promise<{ needsAuth: boolean }> {
       await migrate(driver);
@@ -129,20 +155,8 @@ export function createLumen(driver: SqlDriver, options: { server?: ServerConfig 
       return { needsAuth: false };
     },
 
-    /**
-     * After signing up or logging in: drop the first-launch workspace if it was never used and
-     * the account already has one, claim workspaces from before accounts, then sync.
-     */
-    async connect() {
-      await applyAccess();
-      const unused = await workspace.untouchedBootstrap();
-      if (unused && account.access.spaces.some((s) => s.id !== unused)) await workspace.forget({ space: unused });
-      if ((await account.claimLegacy().catch(() => 0)) > 0) await applyAccess();
-      await sync?.sync().catch(() => {});
-      // An account with nothing in it yet gets a first workspace, sent right away.
-      await workspace.bootstrap();
-      await sync?.sync().catch(() => {});
-    },
+    /** Re-syncs access and data for the signed-in account. */
+    connect,
 
     /** "Later" at first launch: use Lumen on this device only, and get reminded now and then. */
     async continueSignedOut() {
@@ -153,20 +167,54 @@ export function createLumen(driver: SqlDriver, options: { server?: ServerConfig 
     /** Changes the server hasn't received yet. */
     unsyncedCount,
 
+    /** Creates an account and makes it this device's; see signIn. */
+    signUp: (input: { email: string; password: string; name: string }, options?: { discardUnsent?: boolean }) =>
+      signIn(() => account.signUp(input), options),
+    /** Logs in and makes that account this device's; see signIn. */
+    logIn: (input: { email: string; password: string }, options?: { discardUnsent?: boolean }) =>
+      signIn(() => account.logIn(input), options),
+
     /**
-     * Signs out and clears this device (the notes stay in the account). Refuses while changes
-     * are unsynced, unless `force` (they're lost).
+     * Signs out, keeping the notes here to use offline. Nothing syncs until someone signs in:
+     * the same account carries on where it left off; anyone else replaces these notes with
+     * their own, after the unsent changes are delivered to this account.
      */
-    async signOut({ force = false } = {}) {
-      if (!force) {
-        await sync?.sync().catch(() => {});
-        const pending = await unsyncedCount();
-        if (pending) throw new UnsyncedChangesError(pending);
-      }
-      await account.logOut();
-      await clearDevice();
+    async signOut() {
+      await sync?.sync().catch(() => {});
+      await account.signOutLocally();
     },
   };
+
+  /**
+   * One device, one account's notes. Signing in as the account whose notes are here (or on a
+   * device with notes from before any sign-in) keeps them and syncs. Signing in as anyone else
+   * first sends the previous account its unsent changes, then clears the device and pulls the
+   * new account's notes.
+   */
+  async function signIn(authenticate: () => Promise<{ user: { id: string; email: string; name: string }; token: string }>, { discardUnsent = false } = {}) {
+    const next = await authenticate();
+    const previous = account.previous;
+    if (previous && previous.user.id !== next.user.id) {
+      if ((await unsyncedCount()) > 0) {
+        try {
+          await sync?.pushAs(previous.token);
+        } catch {
+          // Can't deliver them now; let the person decide.
+        }
+        const pending = await unsyncedCount();
+        if (pending && !discardUnsent) {
+          await account.revoke(next.token);
+          throw new AccountSwitchError(pending, previous.user.email);
+        }
+      }
+      await account.forgetPrevious();
+      await clearDevice();
+    } else if (previous) {
+      await account.revoke(previous.token);
+    }
+    await account.adopt(next);
+    await connect();
+  }
 }
 
 export type Lumen = ReturnType<typeof createLumen>;
