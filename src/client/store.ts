@@ -2,7 +2,7 @@
 // their field clocks, merges the ops (applyOp), and writes the rows, clocks, ops and
 // the clock state in one transaction. Commits are serialized.
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { HlcClock } from "../hlc";
 import { uuidv7 } from "../ids";
 import type { TableName } from "../model";
@@ -13,6 +13,8 @@ import { META_KEYS, RECORD_TABLES, field_clock, meta, ops as opsTable } from "..
 import type { LumenDb } from "./driver";
 
 const OPS_PER_INSERT = 500;
+/** Records loaded per query (SQLite caps bound variables per statement). */
+const LOAD_CHUNK = 400;
 
 /** `remote`: the change came from another device (sync, a restored backup), not this one. */
 export type ChangeListener = (changed: { table: TableName; id: string }[], info: { remote: boolean }) => void;
@@ -82,17 +84,38 @@ export class LocalStore {
     const statements: any[] = [];
     const changed: { table: TableName; id: string }[] = [];
 
+    // Every touched record and its clocks, loaded in a few queries per table rather than two
+    // per record (on desktop each query crosses the Rust bridge).
+    const rowsById = new Map<string, Record<string, unknown>>();
+    const clocksById = new Map<string, FieldClocks>();
+    const idsByTable = new Map<TableName, string[]>();
+    for (const group of groups.values()) {
+      const { table, record_id } = group[0]!;
+      idsByTable.set(table, [...(idsByTable.get(table) ?? []), record_id]);
+    }
+    for (const [table, ids] of idsByTable) {
+      const t = RECORD_TABLES[table] as any;
+      for (let i = 0; i < ids.length; i += LOAD_CHUNK) {
+        const chunk = ids.slice(i, i + LOAD_CHUNK);
+        for (const row of (await db.select().from(t).where(inArray(t.id, chunk))) as Record<string, unknown>[]) rowsById.set(`${table}:${row.id}`, row);
+        const clockRows = await db
+          .select()
+          .from(field_clock)
+          .where(and(eq(field_clock.table_name, table), inArray(field_clock.record_id, chunk)));
+        for (const r of clockRows) {
+          const key = `${table}:${r.record_id}`;
+          if (!clocksById.has(key)) clocksById.set(key, new Map());
+          clocksById.get(key)!.set(r.path_key, r.hlc);
+        }
+      }
+    }
+
     for (const group of groups.values()) {
       const { table, record_id: id } = group[0]!;
       const t = RECORD_TABLES[table] as any;
-      const [row] = await db.select().from(t).where(eq(t.id, id));
-      const clockRows = await db
-        .select()
-        .from(field_clock)
-        .where(and(eq(field_clock.table_name, table), eq(field_clock.record_id, id)));
-
-      const record: Record<string, unknown> = row ? { ...(row as object) } : { id };
-      const clocks: FieldClocks = new Map(clockRows.map((r) => [r.path_key, r.hlc]));
+      const row = rowsById.get(`${table}:${id}`);
+      const record: Record<string, unknown> = row ? { ...row } : { id };
+      const clocks: FieldClocks = clocksById.get(`${table}:${id}`) ?? new Map();
       let applied = false;
       for (const op of group) applied = applyOp(record as never, clocks, op) || applied;
       if (!applied) continue;
