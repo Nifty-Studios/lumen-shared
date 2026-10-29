@@ -39,7 +39,7 @@ const dir = mkdtempSync(join(tmpdir(), "lumen-publish-"));
 writeFileSync(join(dir, "manifest.json"), JSON.stringify(manifest, null, 2));
 writeFileSync(join(dir, "index.html"), page(manifest));
 put("manifest.json", join(dir, "manifest.json"), "application/json");
-put("index.html", join(dir, "index.html"), "text/html; charset=utf-8");
+put("index.html", join(dir, "index.html"), "text/html"); // the page declares utf-8 itself
 console.log(`\nDownload page: ${BASE}/index.html\n${platform}: ${BASE}/${LATEST[platform]}`);
 
 function page(m) {
