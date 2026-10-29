@@ -209,6 +209,11 @@ export function createAccount(db: LumenDb, server: ServerConfig | undefined) {
     pageShares: (pageId: string) => people(`/pages/${pageId}/shares`),
     sharePage: (pageId: string, invite: { email: string; role: "editor" | "viewer" }) => people(`/pages/${pageId}/shares`, "POST", invite),
     unsharePage: (pageId: string, email: string) => people(`/pages/${pageId}/shares`, "DELETE", { email }),
+
+    // AI connection links (MCP): each is a private URL to paste into Claude or another assistant.
+    aiLinks: () => authed<{ links: { id: string; created_at: number; last_used_at: number }[] }>("/auth/ai-links").then((r) => r.links),
+    createAiLink: () => authed<{ url: string }>("/auth/ai-links", { method: "POST" }).then((r) => r.url),
+    revokeAiLink: (id: string) => authed(`/auth/ai-links/${id}`, { method: "DELETE" }),
   };
 }
 

@@ -10,7 +10,7 @@ import { migrate } from "./migrate";
 import { createSettings } from "./settings";
 import { LocalStore } from "./store";
 import { SyncClient } from "./sync";
-import { createWorkspace, type AccessView } from "./workspace";
+import { createWorkspace, pageTitle, type AccessView } from "./workspace";
 
 export * from "./account";
 export * from "./backup";
@@ -21,6 +21,14 @@ export * from "./store";
 export * from "./sync";
 export * from "./workspace";
 export type { ImportSummary } from "../import/notion";
+
+/** Something worth telling the person about, e.g. a page shared with them. */
+export interface Notice {
+  title: string;
+  body: string;
+  /** A page to open when they tap it. */
+  pageId?: string | undefined;
+}
 
 /**
  * Someone else is signing in, but the notes on this device belong to the account that was
@@ -46,11 +54,32 @@ export function createLumen(driver: SqlDriver, options: { server?: ServerConfig 
   const workspace = createWorkspace(store, view);
   const settings = createSettings(db);
   const rejectedListeners = new Set<(opIds: string[]) => void>();
+  const noticeListeners = new Set<(n: Notice) => void>();
+  const pendingNotices: string[] = [];
+
+  async function flushNotices() {
+    while (pendingNotices.length) {
+      const [kind, id] = pendingNotices.shift()!.split(":") as ["space" | "page", string];
+      let notice: Notice | undefined;
+      if (kind === "page") {
+        const page = await workspace.getBlock(id);
+        const role = account.access.pages.find((p) => p.id === id)?.role;
+        if (page) notice = { title: "A page was shared with you", body: `“${pageTitle(page)}” · ${role === "viewer" ? "you can view it" : "you can edit it"}`, pageId: id };
+      } else {
+        const [ws] = await db.select().from(space).where(eq(space.id, id));
+        const role = account.access.spaces.find((s) => s.id === id)?.role;
+        if (ws) notice = { title: "You joined a workspace", body: `${ws.name} · ${role === "viewer" ? "you can view it" : role === "owner" ? "you're an owner" : "you can edit it"}`, pageId: ws.pages[0] };
+      }
+      if (notice) noticeListeners.forEach((l) => l(notice!));
+    }
+  }
 
   /** Refreshes what the account can access: drops what was lost, re-pulls when something was gained. */
-  async function applyAccess() {
+  async function applyAccess({ notify = false } = {}) {
     if (!account.current) return;
     const { gained, lost } = await account.refreshAccess();
+    // Shared with them mid-session: told once the notes have arrived (after the next sync).
+    if (notify) pendingNotices.push(...gained);
     const memberOf = new Set(account.access.spaces.map((s) => s.id));
     for (const scope of lost) {
       const [kind, id] = scope.split(":") as ["space" | "page", string];
@@ -77,10 +106,14 @@ export function createLumen(driver: SqlDriver, options: { server?: ServerConfig 
         ...(server.fetch ? { fetch: server.fetch } : {}),
         token: () => account.current?.token,
         onUnauthorized: () => void account.expire(),
-        onAccessChanged: applyAccess,
+        onAccessChanged: () => applyAccess({ notify: true }),
         onRejected: (ids) => rejectedListeners.forEach((l) => l(ids)),
       })
     : undefined;
+
+  sync?.onStatus((status) => {
+    if (status.state === "idle" && pendingNotices.length) void flushNotices().catch(() => {});
+  });
 
   const unsyncedCount = async () => (await db.select({ n: count() }).from(ops).where(eq(ops.synced, false)))[0]?.n ?? 0;
 
@@ -123,6 +156,11 @@ export function createLumen(driver: SqlDriver, options: { server?: ServerConfig 
     ...workspace,
     ...settings,
     onChange: store.onChange,
+    /** Things to tell the person (a page or workspace shared with them), with a sound. */
+    onNotice(listener: (n: Notice) => void) {
+      noticeListeners.add(listener);
+      return () => void noticeListeners.delete(listener);
+    },
     /** The server refused some changes from this device (edit rights were taken away). */
     onSyncRejected(listener: (opIds: string[]) => void) {
       rejectedListeners.add(listener);
