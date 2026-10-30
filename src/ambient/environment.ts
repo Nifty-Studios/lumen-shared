@@ -34,6 +34,12 @@ export interface LumenSettings {
   skyBehindPage: boolean;
   /** The first-launch welcome animation has played on this device. */
   welcomed: boolean;
+  /** Buttons and highlights: a hex color, or null to follow the sky (rose dawn, blue day…). */
+  accent: string | null;
+  /** Underline misspelled words in the editor. */
+  spellcheck: boolean;
+  /** Which English: "auto" is American on US devices, British elsewhere. */
+  spelling: "auto" | "en-GB" | "en-US";
 }
 
 export const DEFAULT_SETTINGS: LumenSettings = {
@@ -48,6 +54,9 @@ export const DEFAULT_SETTINGS: LumenSettings = {
   sound: false,
   skyBehindPage: false,
   welcomed: false,
+  accent: null,
+  spellcheck: true,
+  spelling: "auto",
 };
 
 export interface Mood {

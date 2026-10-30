@@ -62,5 +62,23 @@ export const serverMigrations: Migration[] = [
       "ALTER TABLE `server_ops` ADD `space_id` text;",
       "CREATE INDEX `server_ops_space_idx` ON `server_ops` (`space_id`,`seq`);"
     ]
+  },
+  {
+    "tag": "0002_organic_penance",
+    "statements": [
+      "CREATE TABLE `dictionary_words` (\n\t`user_id` text NOT NULL,\n\t`word` text NOT NULL,\n\t`added_at` integer NOT NULL,\n\tPRIMARY KEY(`user_id`, `word`)\n);",
+      "CREATE TABLE `friendships` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`requester_id` text NOT NULL,\n\t`addressee_id` text NOT NULL,\n\t`status` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`accepted_at` integer\n);",
+      "CREATE UNIQUE INDEX `friendships_pair_idx` ON `friendships` (`requester_id`,`addressee_id`);",
+      "CREATE INDEX `friendships_addressee_idx` ON `friendships` (`addressee_id`);",
+      "CREATE TABLE `notifications` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`user_id` text NOT NULL,\n\t`kind` text NOT NULL,\n\t`title` text NOT NULL,\n\t`body` text NOT NULL,\n\t`actor_id` text,\n\t`page_id` text,\n\t`space_id` text,\n\t`friendship_id` text,\n\t`created_at` integer NOT NULL,\n\t`read_at` integer\n);",
+      "CREATE INDEX `notifications_user_idx` ON `notifications` (`user_id`,`created_at`);",
+      "ALTER TABLE `invites` ADD `title` text;"
+    ]
+  },
+  {
+    "tag": "0003_damp_pepper_potts",
+    "statements": [
+      "ALTER TABLE `dictionary_words` ADD `meaning` text;"
+    ]
   }
 ];

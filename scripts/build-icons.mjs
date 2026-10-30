@@ -27,6 +27,8 @@ const UI = [
   "chevrons-up-down", "user-plus", "share-2", "log-in", "log-out", "pencil", "circle-user", "user-round",
   "wifi", "wifi-off", "users", "mail", "lock", "crown", "link", "layers",
   "minus", "square", "arrow-up", "square-pen", "key-round", "message-circle", "circle-stop",
+  "bell", "bell-off", "user-check", "user-x", "user-minus", "spell-check", "book-a", "pipette",
+  "check-check", "party-popper", "gift", "inbox",
 ];
 
 /** Offered in the page icon picker, in picker order. */

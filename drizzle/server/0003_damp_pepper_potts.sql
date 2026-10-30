@@ -1,0 +1,1 @@
+ALTER TABLE `dictionary_words` ADD `meaning` text;

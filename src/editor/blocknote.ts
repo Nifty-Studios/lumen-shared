@@ -3,3 +3,4 @@
 export * from "./schema";
 export * from "./slash";
 export * from "./live";
+export * from "./spellcheck";

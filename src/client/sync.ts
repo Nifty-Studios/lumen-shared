@@ -21,6 +21,13 @@ export interface SyncConfig {
   onRejected?: (opIds: string[]) => void;
   /** The account's access changed (shared with, removed from…). Sync runs after it. */
   onAccessChanged?: () => Promise<void>;
+  /**
+   * The live socket (re)opened. Anything announced while it was closed (the app was in the
+   * background) was missed, so access, notifications etc. are refreshed here before syncing.
+   */
+  onConnected?: () => Promise<void>;
+  /** Other live messages (inbox, friends, dictionary). */
+  onMessage?: (msg: LiveMessage) => void;
   fetch?: typeof fetch;
   WebSocket?: typeof WebSocket;
 }
@@ -118,7 +125,11 @@ export class SyncClient {
       ws.onopen = () => {
         delay = 1_000;
         this.setStatus({ ...this.status, live: true });
-        void this.sync().catch(() => {}); // catch up on anything missed while closed
+        // Catch up on anything missed while closed: access first, so the pull includes what was shared.
+        void (this.config.onConnected?.() ?? Promise.resolve())
+          .catch(() => {})
+          .then(() => this.sync())
+          .catch(() => {});
       };
       ws.onmessage = (e) => {
         let msg: LiveMessage | undefined;
@@ -126,7 +137,8 @@ export class SyncClient {
           msg = JSON.parse(String(e.data));
         } catch {}
         if (msg?.type === "ops") void this.sync().catch(() => {});
-        if (msg?.type === "access") void (this.config.onAccessChanged?.() ?? Promise.resolve()).then(() => this.sync()).catch(() => {});
+        else if (msg?.type === "access") void (this.config.onAccessChanged?.() ?? Promise.resolve()).then(() => this.sync()).catch(() => {});
+        else if (msg && msg.type !== "ping") this.config.onMessage?.(msg);
       };
       ws.onclose = () => {
         if (socket === ws) socket = undefined;

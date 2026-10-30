@@ -2,9 +2,9 @@
 // back by sequence number, and never merges records itself. To enforce who may read and write
 // what, it also keeps accounts, memberships and a small registry of where each record lives.
 
-import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import type { Json, TableName } from "../model";
-import type { PageRole, SpaceRole } from "../account";
+import type { NotificationKind, PageRole, SpaceRole } from "../account";
 
 export const server_ops = sqliteTable(
   "server_ops",
@@ -84,8 +84,59 @@ export const invites = sqliteTable(
     role: text().$type<SpaceRole>().notNull(),
     invited_by: text().notNull(),
     created_at: integer().notNull(),
+    /** The page or workspace name when invited, for the notification. */
+    title: text(),
   },
   (t) => [index("invites_email_idx").on(t.email), index("invites_target_idx").on(t.target_id)],
+);
+
+/** Something to tell a person: a share, a friend request. Kept until they clear it. */
+export const notifications = sqliteTable(
+  "notifications",
+  {
+    id: text().primaryKey(),
+    user_id: text().notNull(),
+    kind: text().$type<NotificationKind>().notNull(),
+    title: text().notNull(),
+    body: text().notNull(),
+    actor_id: text(),
+    page_id: text(),
+    space_id: text(),
+    friendship_id: text(),
+    created_at: integer().notNull(),
+    read_at: integer(),
+  },
+  (t) => [index("notifications_user_idx").on(t.user_id, t.created_at)],
+);
+
+/** A friend request (pending) or a friendship (accepted); one row per pair. */
+export const friendships = sqliteTable(
+  "friendships",
+  {
+    id: text().primaryKey(),
+    requester_id: text().notNull(),
+    addressee_id: text().notNull(),
+    status: text().$type<"pending" | "accepted">().notNull(),
+    created_at: integer().notNull(),
+    accepted_at: integer(),
+  },
+  (t) => [
+    uniqueIndex("friendships_pair_idx").on(t.requester_id, t.addressee_id),
+    index("friendships_addressee_idx").on(t.addressee_id),
+  ],
+);
+
+/** Words a person added to their spellchecker. */
+export const dictionary_words = sqliteTable(
+  "dictionary_words",
+  {
+    user_id: text().notNull(),
+    word: text().notNull(),
+    added_at: integer().notNull(),
+    /** What the word means, in the person's own words (optional). */
+    meaning: text(),
+  },
+  (t) => [primaryKey({ columns: [t.user_id, t.word] })],
 );
 
 /**

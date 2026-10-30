@@ -5,9 +5,14 @@
 import { eq, inArray } from "drizzle-orm";
 import {
   authResponseSchema,
+  dictionarySchema,
+  friendListSchema,
   meSchema,
+  notificationListSchema,
   peopleSchema,
+  type Friend,
   type InviteRequest,
+  type LumenNotification,
   type Me,
   type Person,
   type User,
@@ -207,8 +212,26 @@ export function createAccount(db: LumenDb, server: ServerConfig | undefined) {
     invite: (spaceId: string, invite: InviteRequest) => people(`/spaces/${spaceId}/members`, "POST", invite),
     removeMember: (spaceId: string, email: string) => people(`/spaces/${spaceId}/members`, "DELETE", { email }),
     pageShares: (pageId: string) => people(`/pages/${pageId}/shares`),
-    sharePage: (pageId: string, invite: { email: string; role: "editor" | "viewer" }) => people(`/pages/${pageId}/shares`, "POST", invite),
+    sharePage: (pageId: string, invite: { email: string; role: "editor" | "viewer"; title?: string }) => people(`/pages/${pageId}/shares`, "POST", invite),
     unsharePage: (pageId: string, email: string) => people(`/pages/${pageId}/shares`, "DELETE", { email }),
+
+    // Notifications (shares, friend requests), newest first.
+    notifications: () => authed("/notifications", { schema: notificationListSchema }).then((r) => r.notifications as LumenNotification[]),
+    /** Marks these notifications read, or all of them. */
+    markRead: (ids?: string[]) => authed("/notifications/read", { method: "POST", body: JSON.stringify(ids ? { ids } : {}) }),
+    clearNotifications: () => authed("/notifications", { method: "DELETE" }),
+
+    // Friends: people you share with often. A request waits until the other person accepts.
+    friends: () => authed("/friends", { schema: friendListSchema }).then((r) => r.friends as Friend[]),
+    addFriend: (email: string) => authed("/friends", { method: "POST", body: JSON.stringify({ email }), schema: friendListSchema }).then((r) => r.friends as Friend[]),
+    acceptFriend: (id: string) => authed(`/friends/${id}/accept`, { method: "POST", schema: friendListSchema }).then((r) => r.friends as Friend[]),
+    /** Declines a request, cancels one you sent, or unfriends. */
+    removeFriend: (id: string) => authed(`/friends/${id}`, { method: "DELETE", schema: friendListSchema }).then((r) => r.friends as Friend[]),
+
+    // The personal dictionary (see dictionary.ts, which keeps a copy on the device).
+    dictionary: () => authed("/dictionary", { schema: dictionarySchema }),
+    changeDictionary: (change: { add?: string[]; remove?: string[]; define?: { word: string; meaning: string }[] }) =>
+      authed("/dictionary", { method: "POST", body: JSON.stringify(change), schema: dictionarySchema }),
 
     // AI connection links (MCP): each is a private URL to paste into Claude or another assistant.
     aiLinks: () => authed<{ links: { id: string; created_at: number; last_used_at: number }[] }>("/auth/ai-links").then((r) => r.links),

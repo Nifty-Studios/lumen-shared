@@ -15,6 +15,20 @@
       "when": 1793258089037,
       "tag": "0001_known_inertia",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793354348648,
+      "tag": "0002_organic_penance",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793356775183,
+      "tag": "0003_damp_pepper_potts",
+      "breakpoints": true
     }
   ]
 }

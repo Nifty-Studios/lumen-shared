@@ -55,7 +55,31 @@ function blend(weights: ReturnType<typeof hourWeights>, colors: Record<keyof Ret
   return scale(out, 1 / (total || 1));
 }
 
-export function themeFor(sky: SkyState, dark: boolean): ThemeTokens {
+/** Accent colors to pick from (Settings > Appearance); any other hex works too. */
+export const ACCENT_PRESETS: { name: string; color: string }[] = [
+  { name: "Blue", color: "#2f7bd6" },
+  { name: "Violet", color: "#7c5cd6" },
+  { name: "Rose", color: "#d0577f" },
+  { name: "Red", color: "#d14343" },
+  { name: "Amber", color: "#c4741c" },
+  { name: "Green", color: "#2f9e5b" },
+  { name: "Teal", color: "#1f9aa3" },
+  { name: "Graphite", color: "#5d6577" },
+];
+
+export const isHexColor = (s: string) => /^#[0-9a-f]{6}$/i.test(s.trim());
+
+const luminance = (c: Rgb) => (c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114) / 255;
+
+/** A picked accent, tuned for the mode: brighter on dark glass, deeper on light paper. */
+function customAccent(color: string, dark: boolean): Rgb {
+  let c = hex(color);
+  if (dark) while (luminance(c) < 0.55) c = mix(c, [255, 255, 255], 0.18);
+  else while (luminance(c) > 0.55) c = mix(c, [0, 0, 0], 0.15);
+  return c;
+}
+
+export function themeFor(sky: SkyState, dark: boolean, accentColor?: string | null): ThemeTokens {
   const w = hourWeights(sky);
   const d = sky.daylight;
   let top = hex(sky.skyTop);
@@ -91,7 +115,10 @@ export function themeFor(sky: SkyState, dark: boolean): ThemeTokens {
       });
 
   const text: Rgb = dark ? mix(hex("#d9d5cc"), hex("#eeebe5"), d) : mix(hex("#3b342c"), hex("#2a2926"), d);
-  const accent = dark
+  const picked = accentColor && isHexColor(accentColor) ? customAccent(accentColor, dark) : undefined;
+  const accent = picked
+    ? picked
+    : dark
     ? blend(w, { night: hex("#a99cff"), dawn: hex("#f08fb0"), golden: hex("#f2aa5c"), day: hex("#6cb2ff") })
     : blend(w, { night: hex("#6c5fd3"), dawn: hex("#d0577f"), golden: hex("#c4741c"), day: hex("#2f7bd6") });
   const ink: Rgb = dark ? [255, 255, 255] : [0, 0, 0];
@@ -114,7 +141,7 @@ export function themeFor(sky: SkyState, dark: boolean): ThemeTokens {
     active: rgba(ink, dark ? 0.11 : 0.085),
     accent: toHex(accent),
     accentSoft: rgba(accent, dark ? 0.2 : 0.14),
-    accentText: dark ? "#14131a" : "#ffffff",
+    accentText: picked ? (luminance(picked) > 0.5 ? "#14131a" : "#ffffff") : dark ? "#14131a" : "#ffffff",
     selection: rgba(accent, dark ? 0.32 : 0.22),
     shadow: rgba(dark ? [0, 0, 0] : mix(hex("#2c2a45"), [0, 0, 0], 0.4), dark ? 0.45 : 0.16),
     scrim: rgba(dark ? [0, 0, 0] : hex("#1d1b2e"), dark ? 0.5 : 0.28),

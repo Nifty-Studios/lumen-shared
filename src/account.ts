@@ -4,6 +4,7 @@
 //   POST /auth/claim-legacy (x-legacy-token header): ownerless workspaces from before accounts -> this user
 //   GET/POST/DELETE /spaces/:id/members                   GET/POST/DELETE /pages/:id/shares
 //   GET  /sync/live?token=… (WebSocket): LiveMessage
+//   Notifications, friends and the personal dictionary are described further down.
 // Every other request carries `authorization: Bearer <token>`.
 
 import { z } from "zod";
@@ -54,7 +55,12 @@ export const meSchema = z.object({
 });
 export type Me = z.infer<typeof meSchema>;
 
-export const inviteRequestSchema = z.object({ email, role: z.enum(SPACE_ROLES) });
+export const inviteRequestSchema = z.object({
+  email,
+  role: z.enum(SPACE_ROLES),
+  /** The page or workspace name, for the notification the other person gets. */
+  title: z.string().trim().max(200).optional(),
+});
 export type InviteRequest = z.input<typeof inviteRequestSchema>;
 
 export const personSchema = z.object({
@@ -70,5 +76,64 @@ export const peopleSchema = z.object({ people: z.array(personSchema) });
 
 export const removePersonSchema = z.object({ email });
 
+// --- notifications ---
+//   GET  /notifications -> NotificationList        POST /notifications/read {ids?} (none = all)
+
+export const NOTIFICATION_KINDS = ["page_shared", "space_shared", "friend_request", "friend_accepted"] as const;
+export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
+
+export const notificationSchema = z.object({
+  id: z.string(),
+  kind: z.enum(NOTIFICATION_KINDS),
+  title: z.string(),
+  body: z.string(),
+  /** Who caused it. */
+  actor: z.object({ id: z.string(), name: z.string(), email: z.string() }).optional(),
+  /** The page to open (a shared page, or a shared workspace's first page). */
+  page_id: z.string().optional(),
+  space_id: z.string().optional(),
+  /** The friend request it's about. */
+  friendship_id: z.string().optional(),
+  created_at: z.number(),
+  read_at: z.number().optional(),
+});
+export type LumenNotification = z.infer<typeof notificationSchema>;
+export const notificationListSchema = z.object({ notifications: z.array(notificationSchema) });
+export const markReadSchema = z.object({ ids: z.array(z.string()).max(500).optional() });
+
+// --- friends ---
+//   GET /friends -> FriendList    POST /friends {email}    POST /friends/:id/accept    DELETE /friends/:id
+
+export const friendSchema = z.object({
+  /** The friendship (or request) id. */
+  id: z.string(),
+  user: userSchema,
+  /** accepted; incoming = they asked you; outgoing = you asked them. */
+  status: z.enum(["accepted", "incoming", "outgoing"]),
+  since: z.number(),
+});
+export type Friend = z.infer<typeof friendSchema>;
+export const friendListSchema = z.object({ friends: z.array(friendSchema) });
+export const friendRequestSchema = z.object({ email });
+
+// --- personal dictionary (words the spellchecker accepts, each with an optional meaning) ---
+//   GET /dictionary -> Dictionary    POST /dictionary {add?, remove?, define?} -> Dictionary
+
+const word = z.string().trim().min(1).max(64);
+const meaning = z.string().trim().max(2000);
+export const dictionaryEntrySchema = z.object({ word: z.string(), meaning: z.string().optional() });
+export type DictionaryEntry = z.infer<typeof dictionaryEntrySchema>;
+export const dictionarySchema = z.object({
+  words: z.array(z.string()),
+  /** The same words with their meanings (missing from servers before meanings existed). */
+  entries: z.array(dictionaryEntrySchema).optional(),
+});
+export const dictionaryChangeSchema = z.object({
+  add: z.array(word).max(1000).optional(),
+  remove: z.array(word).max(1000).optional(),
+  /** Sets meanings (adding the word if needed); an empty meaning clears it. */
+  define: z.array(z.object({ word, meaning })).max(1000).optional(),
+});
+
 /** Server -> client over the live socket. */
-export type LiveMessage = { type: "ops" } | { type: "access" } | { type: "ping" };
+export type LiveMessage = { type: "ops" } | { type: "access" } | { type: "inbox" } | { type: "friends" } | { type: "dictionary" } | { type: "ping" };
