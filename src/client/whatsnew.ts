@@ -14,6 +14,15 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "1.3.1",
+    title: "An easier calendar",
+    items: [
+      { title: "A box of stickers", body: "All the stickers sit together in their own box now, with their names. Drag one onto a day, or tap it to put it on the day you've picked." },
+      { title: "Jump to any month", body: "Tap the month's name to pick any month and year, or go straight back to today. On a computer, the arrow keys move the day, Page Up and Page Down the month, and T comes back to today." },
+      { title: "Fixed", body: "Lumen 1.3.0 for Android closed as soon as it opened. On Windows, the What's new window is fully visible again." },
+    ],
+  },
+  {
     version: "1.3.0",
     title: "A calendar, and a sky that celebrates",
     items: [
