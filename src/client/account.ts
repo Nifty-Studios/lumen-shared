@@ -10,6 +10,7 @@ import {
   meSchema,
   notificationListSchema,
   peopleSchema,
+  profileSchema,
   type Friend,
   type InviteRequest,
   type LumenNotification,
@@ -232,6 +233,10 @@ export function createAccount(db: LumenDb, server: ServerConfig | undefined) {
     dictionary: () => authed("/dictionary", { schema: dictionarySchema }),
     changeDictionary: (change: { add?: string[]; remove?: string[]; define?: { word: string; meaning: string }[] }) =>
       authed("/dictionary", { method: "POST", body: JSON.stringify(change), schema: dictionarySchema }),
+
+    // The profile: just the birthday for now (see profile.ts).
+    profile: () => authed("/profile", { schema: profileSchema }),
+    setProfile: (profile: { birthday: string | null }) => authed("/profile", { method: "POST", body: JSON.stringify(profile), schema: profileSchema }),
 
     // AI connection links (MCP): each is a private URL to paste into Claude or another assistant.
     aiLinks: () => authed<{ links: { id: string; created_at: number; last_used_at: number }[] }>("/auth/ai-links").then((r) => r.links),

@@ -32,6 +32,8 @@ export const users = sqliteTable("users", {
   name: text().notNull(),
   password_hash: text().notNull(),
   created_at: integer().notNull(),
+  /** "MM-DD" or "YYYY-MM-DD" (see account.ts profileSchema); null = not given. */
+  birthday: text(),
 });
 
 export const sessions = sqliteTable(

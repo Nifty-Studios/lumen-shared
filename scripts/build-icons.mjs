@@ -29,6 +29,9 @@ const UI = [
   "minus", "square", "arrow-up", "square-pen", "key-round", "message-circle", "circle-stop",
   "bell", "bell-off", "user-check", "user-x", "user-minus", "spell-check", "book-a", "pipette",
   "check-check", "party-popper", "gift", "inbox",
+  // calendar
+  "cake", "cake-slice", "balloon", "chevron-left", "calendar-days", "calendar-plus", "calendar-heart", "calendar-clock",
+  "bell-ring", "repeat", "egg", "ghost", "tree-pine", "candy-cane", "sparkle", "clover", "ribbon", "drama",
 ];
 
 /** Offered in the page icon picker, in picker order. */

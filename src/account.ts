@@ -135,5 +135,16 @@ export const dictionaryChangeSchema = z.object({
   define: z.array(z.object({ word, meaning })).max(1000).optional(),
 });
 
+// --- profile ---
+//   GET /profile -> Profile    POST /profile {birthday} -> Profile
+
+/** "MM-DD", or "YYYY-MM-DD" with the year; null = not given. */
+const birthday = z
+  .string()
+  .regex(/^(\d{4}-)?(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/)
+  .nullable();
+export const profileSchema = z.object({ birthday });
+export type Profile = z.infer<typeof profileSchema>;
+
 /** Server -> client over the live socket. */
-export type LiveMessage = { type: "ops" } | { type: "access" } | { type: "inbox" } | { type: "friends" } | { type: "dictionary" } | { type: "ping" };
+export type LiveMessage = { type: "ops" } | { type: "access" } | { type: "inbox" } | { type: "friends" } | { type: "dictionary" } | { type: "profile" } | { type: "ping" };

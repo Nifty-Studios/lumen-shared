@@ -8,12 +8,14 @@ import { exportBackup, restoreBackup } from "./backup";
 import { createDictionary } from "./dictionary";
 import { createInbox } from "./inbox";
 import { createWhatsNew } from "./whatsnew";
+import { createCalendar } from "./calendar";
+import { createProfile } from "./profile";
 import { createDb, type SqlDriver } from "./driver";
 import { migrate } from "./migrate";
 import { createSettings } from "./settings";
 import { LocalStore } from "./store";
 import { SyncClient } from "./sync";
-import { createWorkspace, pageTitle, type AccessView } from "./workspace";
+import { createWorkspace, type AccessView } from "./workspace";
 import type { LiveMessage, LumenNotification } from "../account";
 
 export * from "./account";
@@ -28,6 +30,8 @@ export * from "./sync";
 export * from "./tools";
 export * from "./workspace";
 export * from "./whatsnew";
+export * from "./calendar";
+export * from "./profile";
 export type { ImportSummary } from "../import/notion";
 
 /** Something worth telling the person about, e.g. a page shared with them. */
@@ -36,9 +40,13 @@ export interface Notice {
   body: string;
   /** A page to open when they tap it. */
   pageId?: string | undefined;
+  /** The workspace it's about (a workspace share). */
+  spaceId?: string | undefined;
+  /** A calendar event (a reminder). */
+  eventId?: string | undefined;
   /** The inbox entry it came from, if any. */
   notificationId?: string | undefined;
-  kind?: LumenNotification["kind"] | undefined;
+  kind?: LumenNotification["kind"] | "reminder" | undefined;
 }
 
 /**
@@ -67,34 +75,16 @@ export function createLumen(driver: SqlDriver, options: { server?: ServerConfig 
   const inbox = createInbox(db, account);
   const whatsNew = createWhatsNew(db);
   const dictionary = createDictionary(db, account);
+  const profile = createProfile(db, account);
+  const calendar = createCalendar(store, workspace, settings, profile, account);
   const friendListeners = new Set<() => void>();
   const rejectedListeners = new Set<(opIds: string[]) => void>();
   const noticeListeners = new Set<(n: Notice) => void>();
-  const pendingNotices: string[] = [];
-
-  async function flushNotices() {
-    while (pendingNotices.length) {
-      const [kind, id] = pendingNotices.shift()!.split(":") as ["space" | "page", string];
-      let notice: Notice | undefined;
-      if (kind === "page") {
-        const page = await workspace.getBlock(id);
-        const role = account.access.pages.find((p) => p.id === id)?.role;
-        if (page) notice = { title: "A page was shared with you", body: `“${pageTitle(page)}” · ${role === "viewer" ? "you can view it" : "you can edit it"}`, pageId: id, kind: "page_shared" };
-      } else {
-        const [ws] = await db.select().from(space).where(eq(space.id, id));
-        const role = account.access.spaces.find((s) => s.id === id)?.role;
-        if (ws) notice = { title: "You joined a workspace", body: `${ws.name} · ${role === "viewer" ? "you can view it" : role === "owner" ? "you're an owner" : "you can edit it"}`, pageId: ws.pages[0], kind: "space_shared" };
-      }
-      if (notice) noticeListeners.forEach((l) => l(notice!));
-    }
-  }
 
   /** Refreshes what the account can access: drops what was lost, re-pulls when something was gained. */
-  async function applyAccess({ notify = false } = {}) {
+  async function applyAccess() {
     if (!account.current) return;
     const { gained, lost } = await account.refreshAccess();
-    // Shared with them mid-session: told once the notes have arrived (after the next sync).
-    if (notify) pendingNotices.push(...gained);
     const memberOf = new Set(account.access.spaces.map((s) => s.id));
     for (const scope of lost) {
       const [kind, id] = scope.split(":") as ["space" | "page", string];
@@ -121,40 +111,74 @@ export function createLumen(driver: SqlDriver, options: { server?: ServerConfig 
         ...(server.fetch ? { fetch: server.fetch } : {}),
         token: () => account.current?.token,
         onUnauthorized: () => void account.expire(),
-        onAccessChanged: () => applyAccess({ notify: true }),
+        onAccessChanged: () => applyAccess(),
         onConnected: catchUp,
         onMessage: (msg) => void onLive(msg),
         onRejected: (ids) => rejectedListeners.forEach((l) => l(ids)),
       })
     : undefined;
 
-  /** New notifications: friend requests are told right away (shares wait for their notes, see flushNotices). */
-  async function refreshInbox() {
-    const fresh = await inbox.refresh();
-    for (const n of fresh)
-      if (n.kind === "friend_request" || n.kind === "friend_accepted") {
-        const notice: Notice = { title: n.title, body: n.body, notificationId: n.id, kind: n.kind };
-        noticeListeners.forEach((l) => l(notice));
+  // Every notification is told once per device, as a notice (toast, banner, system
+  // notification), including ones that came in while the app was closed. A share is told once
+  // its notes are on the device, so tapping it opens the page.
+  const ANNOUNCED = "announced";
+  const TELL_WITHIN = 3 * 86_400_000;
+  let announcing: Promise<void> = Promise.resolve();
+
+  async function announce() {
+    const me = account.current?.user.id;
+    if (!me) return;
+    const raw = (await db.select().from(meta).where(eq(meta.key, ANNOUNCED)))[0]?.value;
+    let saved: { owner?: string; ids: string[] } | undefined;
+    try {
+      saved = raw ? JSON.parse(raw) : undefined;
+    } catch {}
+    const known = new Set(saved?.owner === me ? saved.ids : []);
+    // First look for this account on this device: what's there already isn't news.
+    const firstLook = saved?.owner !== me;
+    const fresh = firstLook ? [] : inbox.items.filter((n) => !n.read_at && !known.has(n.id) && Date.now() - n.created_at < TELL_WITHIN);
+    const ids = inbox.items.map((n) => n.id);
+    await db
+      .insert(meta)
+      .values({ key: ANNOUNCED, value: JSON.stringify({ owner: me, ids }) })
+      .onConflictDoUpdate({ target: meta.key, set: { value: JSON.stringify({ owner: me, ids }) } });
+    if (!fresh.length) return;
+    if (fresh.some((n) => n.kind === "page_shared" || n.kind === "space_shared")) {
+      await applyAccess().catch(() => {});
+      await sync?.sync().catch(() => {});
+    }
+    for (const n of fresh.reverse()) {
+      let pageId = n.page_id ?? undefined;
+      if (n.kind === "space_shared" && n.space_id) {
+        const [ws] = await db.select().from(space).where(eq(space.id, n.space_id));
+        pageId = ws?.pages[0];
       }
+      const notice: Notice = { title: n.title, body: n.body, notificationId: n.id, kind: n.kind, pageId, spaceId: n.space_id ?? undefined };
+      noticeListeners.forEach((l) => l(notice));
+    }
+  }
+
+  /** Fetches notifications, then tells the new ones. */
+  async function refreshInbox() {
+    await inbox.refresh();
+    announcing = announcing.then(announce, announce);
+    await announcing;
   }
 
   async function onLive(msg: LiveMessage) {
     if (msg.type === "inbox") await refreshInbox().catch(() => {});
     else if (msg.type === "friends") friendListeners.forEach((l) => l());
     else if (msg.type === "dictionary") await dictionary.sync();
+    else if (msg.type === "profile") await profile.sync();
   }
 
   /** The app came back (live socket reopened): pick up whatever was announced while it was away. */
   async function catchUp() {
     if (!account.current) return;
-    await applyAccess({ notify: true }).catch(() => {});
-    await Promise.all([refreshInbox().catch(() => {}), dictionary.sync()]);
+    await applyAccess().catch(() => {});
+    await Promise.all([refreshInbox().catch(() => {}), dictionary.sync(), profile.sync()]);
     friendListeners.forEach((l) => l());
   }
-
-  sync?.onStatus((status) => {
-    if (status.state === "idle" && pendingNotices.length) void flushNotices().catch(() => {});
-  });
 
   const unsyncedCount = async () => (await db.select({ n: count() }).from(ops).where(eq(ops.synced, false)))[0]?.n ?? 0;
 
@@ -167,7 +191,7 @@ export function createLumen(driver: SqlDriver, options: { server?: ServerConfig 
       db.delete(collection_view),
       db.delete(field_clock),
       db.delete(ops),
-      db.delete(meta).where(inArray(meta.key, [META_KEYS.syncCursor, META_KEYS.deviceId, "current_space", "bootstrap", "access", "inbox", "dictionary"])),
+      db.delete(meta).where(inArray(meta.key, [META_KEYS.syncCursor, META_KEYS.deviceId, "current_space", "bootstrap", "access", "inbox", "dictionary", ANNOUNCED, "profile"])),
     ]);
     // A new identity: the server never sends a device its own ops back, and this device's old
     // ops belong to the account that just left, which may come back.
@@ -187,7 +211,7 @@ export function createLumen(driver: SqlDriver, options: { server?: ServerConfig 
     // An account with nothing in it yet gets a first workspace, sent right away.
     await workspace.bootstrap();
     await sync?.sync().catch(() => {});
-    await Promise.all([inbox.refresh().catch(() => {}), dictionary.sync()]);
+    await Promise.all([refreshInbox().catch(() => {}), dictionary.sync(), profile.sync()]);
   }
 
   return {
@@ -203,6 +227,10 @@ export function createLumen(driver: SqlDriver, options: { server?: ServerConfig 
     inbox,
     /** Words the spellchecker accepts, on every device of the account. */
     dictionary,
+    /** Events, holidays, the birthday, reminders and the special day's celebration. */
+    calendar,
+    /** The birthday (on the account, cached here). */
+    profile,
     /** Fetches notifications now (e.g. when the inbox opens). */
     refreshInbox: () => refreshInbox().catch(() => {}),
     /** The friend list changed somewhere (a request came in or was answered). */
@@ -210,7 +238,7 @@ export function createLumen(driver: SqlDriver, options: { server?: ServerConfig 
       friendListeners.add(listener);
       return () => void friendListeners.delete(listener);
     },
-    /** Things to tell the person (a page or workspace shared with them), with a sound. */
+    /** Things to tell the person (shares, friend requests), each once per device, with a sound. */
     onNotice(listener: (n: Notice) => void) {
       noticeListeners.add(listener);
       return () => void noticeListeners.delete(listener);
@@ -238,7 +266,7 @@ export function createLumen(driver: SqlDriver, options: { server?: ServerConfig 
       await settings.loadSettings();
       await whatsNew.markIfFresh();
       await account.load();
-      await Promise.all([inbox.load(), dictionary.load()]);
+      await Promise.all([inbox.load(), dictionary.load(), profile.load()]);
       if (account.available && !account.current && !account.skipped) return { needsAuth: true };
       if (account.current) {
         await applyAccess().catch(() => {});
@@ -247,6 +275,7 @@ export function createLumen(driver: SqlDriver, options: { server?: ServerConfig 
         // Not awaited: the app opens without waiting on the network.
         void refreshInbox().catch(() => {});
         void dictionary.sync();
+        void profile.sync();
       }
       await workspace.bootstrap();
       return { needsAuth: false };

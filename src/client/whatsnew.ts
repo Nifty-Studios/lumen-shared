@@ -14,6 +14,17 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "1.3.0",
+    title: "A calendar, and a sky that celebrates",
+    items: [
+      { title: "Calendar", body: "Plan your days with stickers: drop one on a day, give it a time, and Lumen reminds you when it comes round. Events can repeat, and each one can have as many reminders as you like." },
+      { title: "Special days", body: "New Year, Valentine's Day, Easter, Halloween and Christmas are already on the calendar, and so is your birthday once you tell Lumen when it is." },
+      { title: "A sky for the occasion", body: "On a special day the sky joins in: fireworks, floating hearts, snow and fairy lights, confetti and balloons. Mark your own events to celebrate them too, or turn it off in Settings." },
+      { title: "Notifications that reach you", body: "Shares, friend requests and reminders now show up in your phone's notification bar and as Windows notifications, even ones that arrived while Lumen was closed." },
+      { title: "Fixed", body: "Closing this card now keeps it closed." },
+    ],
+  },
+  {
     version: "1.2.0",
     title: "Friends, notifications and your own colors",
     items: [
@@ -82,6 +93,10 @@ export function createWhatsNew(db: LumenDb) {
       if (!row?.n) await write({ seen: FRESH });
     },
     /** The card was closed: don't show it again for this version. */
-    dismissWhatsNew: (appVersion: string) => write({ seen: appVersion }),
+    // Async on purpose: a Drizzle query only runs once awaited, and callers often don't
+    // (`void lumen.dismissWhatsNew(v)`), which left the card coming back on every start.
+    async dismissWhatsNew(appVersion: string) {
+      await write({ seen: appVersion });
+    },
   };
 }

@@ -40,6 +40,14 @@ export interface LumenSettings {
   spellcheck: boolean;
   /** Which English: "auto" is American on US devices, British elsewhere. */
   spelling: "auto" | "en-GB" | "en-US";
+  /** Show New Year, Valentine's, Easter, Halloween and Christmas in the calendar. */
+  holidays: boolean;
+  /** A notification on the morning of a holiday (and your birthday). */
+  holidayAlerts: boolean;
+  /** Special days take over the sky: fireworks, hearts, snow and lights, confetti. */
+  celebrations: boolean;
+  /** Calendar reminders as notifications. */
+  reminders: boolean;
 }
 
 export const DEFAULT_SETTINGS: LumenSettings = {
@@ -57,6 +65,10 @@ export const DEFAULT_SETTINGS: LumenSettings = {
   accent: null,
   spellcheck: true,
   spelling: "auto",
+  holidays: true,
+  holidayAlerts: true,
+  celebrations: true,
+  reminders: true,
 };
 
 export interface Mood {

@@ -80,5 +80,11 @@ export const serverMigrations: Migration[] = [
     "statements": [
       "ALTER TABLE `dictionary_words` ADD `meaning` text;"
     ]
+  },
+  {
+    "tag": "0004_dry_arachne",
+    "statements": [
+      "ALTER TABLE `users` ADD `birthday` text;"
+    ]
   }
 ];

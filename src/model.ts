@@ -27,6 +27,8 @@ export const BLOCK_TYPES = [
   // v1.5
   "collection_view_page",
   "collection_view",
+  // v1.3: a calendar event, directly in its workspace (see client/calendar.ts)
+  "event",
 ] as const;
 export type BlockType = (typeof BLOCK_TYPES)[number];
 

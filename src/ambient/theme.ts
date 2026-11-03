@@ -5,6 +5,7 @@
 
 import { hex, hsl, lerp, mix, rgba, scale, toHex, type Rgb } from "./color";
 import type { SkyState } from "./sky";
+import type { Celebration } from "../calendar";
 
 export interface ThemeTokens {
   dark: boolean;
@@ -79,12 +80,23 @@ function customAccent(color: string, dark: boolean): Rgb {
   return c;
 }
 
-export function themeFor(sky: SkyState, dark: boolean, accentColor?: string | null): ThemeTokens {
+/**
+ * `celebration` (a special day, see calendar) tints the sky and, while the accent follows the
+ * sky, gives the day its own accent.
+ */
+export function themeFor(sky: SkyState, dark: boolean, accentColor?: string | null, celebration?: Celebration | null): ThemeTokens {
   const w = hourWeights(sky);
   const d = sky.daylight;
   let top = hex(sky.skyTop);
   let mid = hex(sky.skyMid);
   let bottom = hex(sky.skyBottom);
+  if (celebration) {
+    // Strongest by night, when the sky has the least color of its own.
+    const k = celebration.strength * (0.75 + (1 - d) * 0.35);
+    top = mix(top, hex(celebration.tint[0]), k);
+    mid = mix(mid, hex(celebration.tint[1]), k);
+    bottom = mix(bottom, hex(celebration.tint[2]), k);
+  }
 
   if (dark) {
     // Keep the sky behind dark glass dim: by day a deep version of itself, at night as is.
@@ -118,6 +130,8 @@ export function themeFor(sky: SkyState, dark: boolean, accentColor?: string | nu
   const picked = accentColor && isHexColor(accentColor) ? customAccent(accentColor, dark) : undefined;
   const accent = picked
     ? picked
+    : celebration
+    ? hex(celebration.accent[dark ? 1 : 0])
     : dark
     ? blend(w, { night: hex("#a99cff"), dawn: hex("#f08fb0"), golden: hex("#f2aa5c"), day: hex("#6cb2ff") })
     : blend(w, { night: hex("#6c5fd3"), dawn: hex("#d0577f"), golden: hex("#c4741c"), day: hex("#2f7bd6") });
