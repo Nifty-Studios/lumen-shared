@@ -11,6 +11,9 @@ export type EnvWeather = "live" | "clear" | "cloudy" | "rain" | "storm" | "snow"
 export type Motion = "full" | "calm" | "still";
 export type ClockFormat = "auto" | "12h" | "24h";
 
+/** A decorated look ("theme" in the app): illustrated elements around the sky. See ../scenes. */
+export type SceneId = "workstation" | "forest" | "restaurant";
+
 export interface SavedLocation {
   lat: number;
   lon: number;
@@ -36,6 +39,8 @@ export interface LumenSettings {
   welcomed: boolean;
   /** Buttons and highlights: a hex color, or null to follow the sky (rose dawn, blue day…). */
   accent: string | null;
+  /** The theme: drawn decor (a desk, a forest floor, a diner) that lives with the sky, or none. */
+  scene: SceneId | null;
   /** Underline misspelled words in the editor. */
   spellcheck: boolean;
   /** Which English: "auto" is American on US devices, British elsewhere. */
@@ -63,6 +68,7 @@ export const DEFAULT_SETTINGS: LumenSettings = {
   skyBehindPage: false,
   welcomed: false,
   accent: null,
+  scene: null,
   spellcheck: true,
   spelling: "auto",
   holidays: true,

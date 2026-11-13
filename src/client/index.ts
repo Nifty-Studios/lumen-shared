@@ -269,9 +269,18 @@ export function createLumen(driver: SqlDriver, options: { server?: ServerConfig 
       await Promise.all([inbox.load(), dictionary.load(), profile.load()]);
       if (account.available && !account.current && !account.skipped) return { needsAuth: true };
       if (account.current) {
-        await applyAccess().catch(() => {});
-        // A device that just joined pulls before deciding it needs a workspace of its own.
-        if (!(await workspace.getSpace())) await sync?.sync().catch(() => {});
+        if (await workspace.getSpace()) {
+          // The notes are here already: open from the device and check what the account can
+          // access in the background. Waiting for the server here held the whole app on the
+          // loading screen for seconds whenever the server had to wake up.
+          void applyAccess()
+            .then(() => sync?.sync())
+            .catch(() => {});
+        } else {
+          // A device that just joined pulls before deciding it needs a workspace of its own.
+          await applyAccess().catch(() => {});
+          await sync?.sync().catch(() => {});
+        }
         // Not awaited: the app opens without waiting on the network.
         void refreshInbox().catch(() => {});
         void dictionary.sync();

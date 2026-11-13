@@ -16,7 +16,8 @@
     "./ambient": "./src/ambient/index.ts",
     "./export": "./src/export/markdown.ts",
     "./spell": "./src/spell/index.ts",
-    "./calendar": "./src/calendar/index.ts"
+    "./calendar": "./src/calendar/index.ts",
+    "./scenes": "./src/scenes/index.ts"
   },
   "files": [
     "src",

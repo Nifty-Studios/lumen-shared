@@ -14,6 +14,16 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "1.4.0",
+    title: "Themes, and a much quicker start",
+    items: [
+      { title: "Themes", body: "Give Lumen a little world of its own: a Workstation with string lights and a cat asleep on the books, a Forest with a fox by a mossy log, or a Sci-fi restaurant with a robot waiter. Pick one in Settings > Appearance." },
+      { title: "They live with your sky", body: "Themes keep your real weather and time of day. Lamps, windows and neon come on at night, fireflies come out, snow settles on everything, and the umbrella appears when it rains." },
+      { title: "Opens right away", body: "Lumen used to wait for the internet before showing your notes, which could take five seconds. Now it opens from what is on your device and catches up in the background." },
+      { title: "Smoother typing on Windows", body: "Spellchecking moved out of the way, so opening a page no longer pauses while the dictionary loads." },
+    ],
+  },
+  {
     version: "1.3.1",
     title: "An easier calendar",
     items: [
