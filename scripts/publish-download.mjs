@@ -3,6 +3,9 @@
 //   node publish-download.mjs --platform windows|android --file <path> --version 1.0.0
 // Also writes latest.json (Windows in-app updates); Android apps read manifest.json.
 // Needs wrangler logged in (`npx wrangler login`).
+//
+// To rewrite one platform's entry without uploading anything (the file is already in the
+// bucket): --platform android --version 1.3.1 --entry-only 1 --bytes <size> --date <yyyy-mm-dd>
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -16,7 +19,29 @@ const TYPES = { ".exe": "application/vnd.microsoft.portable-executable", ".apk":
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) => (a.startsWith("--") ? [...acc, [a.slice(2), all[i + 1]]] : acc), []));
 const { platform, file, version } = args;
-if (!LATEST[platform] || !file || !version) throw new Error("Usage: --platform windows|android --file <path> --version <x.y.z>");
+const entryOnly = !!args["entry-only"];
+if (!LATEST[platform] || !version || (!file && !entryOnly)) throw new Error("Usage: --platform windows|android --file <path> --version <x.y.z>");
+if (entryOnly && !(Number(args.bytes) > 0 && /^\d{4}-\d\d-\d\d$/.test(args.date ?? ""))) throw new Error("--entry-only needs --bytes <size> and --date <yyyy-mm-dd>");
+
+// The manifest lists every platform, so it is read before anything is uploaded and a failed
+// read stops the publish. (It used to count as "no manifest yet": one dropped request while
+// publishing Windows 1.4.0 wiped the Android entry from the manifest and the download page.)
+async function readManifest() {
+  let last;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const res = await fetch(`${BASE}/manifest.json?t=${Date.now()}`, { cache: "no-store" });
+      if (res.status === 404) return {};
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch (e) {
+      last = e;
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
+  throw new Error(`Could not read the current manifest.json (${last}); nothing was published. Try again when the network is steady.`);
+}
+const manifest = await readManifest();
 
 const put = (key, path, type) =>
   execFileSync("npx", ["--yes", "wrangler@4", "r2", "object", "put", `${BUCKET}/${key}`, "--file", path, "--content-type", type, "--remote"], {
@@ -24,17 +49,18 @@ const put = (key, path, type) =>
     shell: process.platform === "win32",
   });
 
-const ext = file.slice(file.lastIndexOf("."));
+const ext = LATEST[platform].slice(LATEST[platform].lastIndexOf("."));
 const versioned = `${platform}/${LATEST[platform].replace(ext, `-${version}${ext}`)}`;
-console.log(`Uploading ${basename(file)} (${(statSync(file).size / 1e6).toFixed(1)} MB) as ${versioned} and ${LATEST[platform]}`);
-put(versioned, file, TYPES[ext]);
-put(LATEST[platform], file, TYPES[ext]);
+if (!entryOnly) {
+  console.log(`Uploading ${basename(file)} (${(statSync(file).size / 1e6).toFixed(1)} MB) as ${versioned} and ${LATEST[platform]}`);
+  put(versioned, file, TYPES[ext]);
+  put(LATEST[platform], file, TYPES[ext]);
+}
 
 // The manifest: the latest version and size per platform, which the page is built from.
-const manifest = await fetch(`${BASE}/manifest.json`, { cache: "no-store" })
-  .then((r) => (r.ok ? r.json() : {}))
-  .catch(() => ({}));
-manifest[platform] = { version, file: LATEST[platform], versioned, bytes: statSync(file).size, date: new Date().toISOString().slice(0, 10) };
+manifest[platform] = entryOnly
+  ? { version, file: LATEST[platform], versioned, bytes: Number(args.bytes), date: args.date }
+  : { version, file: LATEST[platform], versioned, bytes: statSync(file).size, date: new Date().toISOString().slice(0, 10) };
 
 const dir = mkdtempSync(join(tmpdir(), "lumen-publish-"));
 writeFileSync(join(dir, "manifest.json"), JSON.stringify(manifest, null, 2));
@@ -43,7 +69,7 @@ put("manifest.json", join(dir, "manifest.json"), "application/json");
 
 // Windows in-app updates read latest.json (the Tauri updater format). The installer's signature
 // (<file>.sig, made at build time with stored/keys/lumen-updater.key) must sit next to it.
-if (platform === "windows") {
+if (platform === "windows" && !entryOnly) {
   if (!existsSync(`${file}.sig`)) throw new Error(`Missing ${file}.sig: build with TAURI_SIGNING_PRIVATE_KEY set, or the app can't update to this version.`);
   const latest = {
     version,
