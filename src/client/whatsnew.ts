@@ -14,6 +14,15 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "1.4.1",
+    title: "Themes, redrawn",
+    items: [
+      { title: "Richer drawings", body: "Every theme has been redrawn with light and shadow: grain in the desk, bark and moss on the log, chrome and glass in the diner, and things now sit on the ground instead of floating." },
+      { title: "More to look at", body: "A framed print and a sticky note at the Workstation, a robin and berries in the Forest canopy, a checkerboard floor and proper neon signs in the Sci-fi restaurant, and hazy layers of city, mountains and towers behind them all." },
+      { title: "Your pages come first", body: "The little scene at the bottom of the sidebar no longer covers page names, and steps aside when the window is short." },
+    ],
+  },
+  {
     version: "1.4.0",
     title: "Themes, and a much quicker start",
     items: [
