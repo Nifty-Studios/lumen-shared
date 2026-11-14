@@ -14,6 +14,17 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "1.5.0",
+    title: "Themes take over the whole window",
+    items: [
+      { title: "A whole place, not three ornaments", body: "A theme now dresses everything: a shelf, a bough or the diner's sign across the top of the sidebar, a reading corner, a great old tree or a booth with a jukebox up the right side of the page, and the floor along the bottom." },
+      { title: "Light and dark are shades of the theme", body: "With a theme on, light and dark no longer swap the look: they are the bright and the deep version of the theme's own colors, and every button, card, menu and dialog follows." },
+      { title: "The weather comes inside", body: "The Workstation's window shows today's rain, snow or lightning (and the cat goes to watch). The Forest gets a frog under a leaf or a snowman. In the Sci-fi restaurant, rain is a meteor shower and the specials board changes with the sky." },
+      { title: "Special days decorate the room", body: "Christmas, birthdays, Halloween, Valentine's, Easter and New Year bring a tree, a cake, pumpkins, balloons and bunting into every theme." },
+      { title: "Things to poke", body: "Click the cat, the owl, the jukebox or the robot. The lamp, the lantern and the neon signs are real switches, the clocks tell the time, and the forest's leaves follow the season." },
+    ],
+  },
+  {
     version: "1.4.1",
     title: "Themes, redrawn",
     items: [

@@ -85,9 +85,16 @@ export interface SceneTint {
   accent: [light: string, dark: string];
   tint: [string, string, string];
   strength: number;
+  /** The theme's own paper (the glass and every surface) for light and dark. */
+  paper?: [light: string, dark: string];
+  /** Its ink (text) for light and dark. */
+  ink?: [light: string, dark: string];
 }
 
 /**
+ * With a theme on, light and dark are two shades of the theme: the surfaces take its paper and
+ * the text its ink, and the hour only nudges them.
+ *
  * `celebration` (a special day, see calendar) tints the sky and, while the accent follows the
  * sky, gives the day its own accent. `scene` (the theme) does the same more quietly, and
  * gives way to a celebration.
@@ -125,7 +132,7 @@ export function themeFor(sky: SkyState, dark: boolean, accentColor?: string | nu
     bottom = mix(bottom, hex("#c3b3c9"), lift);
   }
 
-  const base = dark
+  let base = dark
     ? blend(w, {
         night: hsl(232, 0.24, 0.07),
         dawn: hsl(330, 0.12, 0.13),
@@ -139,7 +146,13 @@ export function themeFor(sky: SkyState, dark: boolean, accentColor?: string | nu
         day: hsl(210, 0.32, 0.985),
       });
 
-  const text: Rgb = dark ? mix(hex("#d9d5cc"), hex("#eeebe5"), d) : mix(hex("#3b342c"), hex("#2a2926"), d);
+  let text: Rgb = dark ? mix(hex("#d9d5cc"), hex("#eeebe5"), d) : mix(hex("#3b342c"), hex("#2a2926"), d);
+  if (scene?.paper) {
+    // Dark paper lifts a touch by day and settles at night; light paper warms after dark.
+    const paper = hex(scene.paper[dark ? 1 : 0]);
+    base = mix(base, dark ? scale(paper, lerp(0.82, 1.12, d)) : mix(paper, hex(scene.tint[2]), (1 - d) * 0.08), 0.86);
+  }
+  if (scene?.ink) text = mix(text, hex(scene.ink[dark ? 1 : 0]), 0.85);
   const picked = accentColor && isHexColor(accentColor) ? customAccent(accentColor, dark) : undefined;
   const accent = picked
     ? picked
@@ -151,7 +164,8 @@ export function themeFor(sky: SkyState, dark: boolean, accentColor?: string | nu
     ? blend(w, { night: hex("#a99cff"), dawn: hex("#f08fb0"), golden: hex("#f2aa5c"), day: hex("#6cb2ff") })
     : blend(w, { night: hex("#6c5fd3"), dawn: hex("#d0577f"), golden: hex("#c4741c"), day: hex("#2f7bd6") });
   const ink: Rgb = dark ? [255, 255, 255] : [0, 0, 0];
-  const glassAlpha = dark ? lerp(0.8, 0.7, d) : lerp(0.8, 0.74, d);
+  // A theme's paper is a little more solid than plain glass, so its color carries.
+  const glassAlpha = (dark ? lerp(0.8, 0.7, d) : lerp(0.8, 0.74, d)) + (scene?.paper ? 0.08 : 0);
 
   return {
     dark,
